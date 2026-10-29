@@ -1,0 +1,30 @@
+# A app está na pasta terrenos/ (index.html, PWA, _redirects).
+# Sem isto, o Netlify publica a raiz do GitHub (só README.md) e o site dá 404.
+
+[build]
+  publish = "terrenos"
+
+# Proxy para a DGT (evita CORS). Equivalente ao ficheiro terrenos/_redirects.
+[[redirects]]
+  from = "/snic/*"
+  to = "https://snic.dgterritorio.gov.pt/geoportal/dgt_snic2/api/app/search/cgpr/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/snicp/*"
+  to = "https://snic.dgterritorio.gov.pt/geoportal/dgt_snic2/api/app/search/predio/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/ogc/*"
+  to = "https://ogcapi.dgterritorio.gov.pt/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/snicws"
+  to = "https://snicws.dgterritorio.gov.pt/geoserver/inspire/ows"
+  status = 200
+  force = true

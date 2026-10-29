@@ -30,7 +30,9 @@
   --radius-card:20px; --radius-btn:14px;
   --shadow-fab:0 4px 20px rgba(0,0,0,.22); --transition:.22s cubic-bezier(.4,0,.2,1);
 }
-html,body { height:100%; margin:0; padding:0; font-family:'Inter',system-ui,sans-serif; background:#111; color:var(--text); }
+html { -webkit-text-size-adjust:100%; text-size-adjust:100%; }
+html,body { height:100%; height:100dvh; margin:0; padding:0; font-family:'Inter',system-ui,sans-serif; background:#111; color:var(--text); overflow:hidden; overscroll-behavior:none; touch-action:manipulation; }
+button, a, input, select, textarea { -webkit-tap-highlight-color:transparent; }
 #map { position:fixed; inset:0; z-index:0; }
 .leaflet-draw-toolbar,.leaflet-draw-section { display:none !important; }
 .fab { box-shadow:var(--shadow-fab); border:none; cursor:pointer; font-family:inherit; }
@@ -187,7 +189,7 @@ body.vtx-open #fabs { display:none; }
 .field-row { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
 .field-group { margin-bottom:12px; }
 .field-label { display:block; font-size:.75rem; font-weight:700; color:var(--text-muted); text-transform:uppercase; letter-spacing:.05em; margin-bottom:5px; }
-.field-input,.field-select { width:100%; border:1.5px solid #ddd; border-radius:var(--radius-btn); padding:11px 12px; font-size:.95rem; font-family:inherit; outline:none; background:var(--surface); color:var(--text); transition:border-color var(--transition); appearance:none; -webkit-appearance:none; }
+.field-input,.field-select { width:100%; border:1.5px solid #ddd; border-radius:var(--radius-btn); padding:11px 12px; font-size:16px; font-family:inherit; outline:none; background:var(--surface); color:var(--text); transition:border-color var(--transition); appearance:none; -webkit-appearance:none; }
 .field-select { background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23666' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E"); background-repeat:no-repeat; background-position:right 10px center; padding-right:32px; }
 .field-input:focus,.field-select:focus { border-color:var(--green); }
 .field-input:disabled,.field-select:disabled { background:#f0ece6; color:#aaa; cursor:not-allowed; }
@@ -231,6 +233,23 @@ body.vtx-open #fabs { display:none; }
 .combo-list li { padding:11px 10px; cursor:pointer; border-radius:4px; }
 .combo-list li:hover, .combo-list li.sel { background:#f2f2f2; }
 .combo-list li.none { color:#999; cursor:default; }
+.leaflet-control-zoom, .leaflet-control-layers { margin-top:max(10px,env(safe-area-inset-top)) !important; margin-right:max(10px,env(safe-area-inset-right)) !important; }
+.leaflet-bottom { padding-bottom:env(safe-area-inset-bottom); }
+
+@media (max-width:480px) {
+  .modal-grid, .field-row { grid-template-columns:1fr; }
+  #btnAdd { font-size:.82rem; padding:0 12px; max-width:min(220px,calc(100vw - 76px)); }
+  #toast { white-space:normal; text-align:center; line-height:1.35; }
+  .draw-btns button { min-height:48px; }
+  #sheet { max-height:88dvh; }
+  #modalBody { max-width:100%; border-radius:20px 20px 0 0; }
+  @media (min-height:600px) { #modalBody { border-radius:24px; } }
+  .combo-search { font-size:16px; }
+}
+@media (max-width:360px) {
+  #btnList { padding:0 10px; font-size:.8rem; }
+  #fabs { right:10px; }
+}
 </style>
 </head>
 <body>
