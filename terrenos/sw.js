@@ -2,7 +2,7 @@
    Serve para: (1) cumprir os requisitos de instalação no telemóvel; (2) abrir a app sem rede.
    Guarda a "casca" da app (index.html, freguesias.js, ícones, bibliotecas). NÃO guarda mapas, SNIC, DGT, WMS nem pesquisas.
    Ao alterar ficheiros da app, mude VERSAO (ex.: terrenos-v2) para forçar a atualização. */
-const VERSAO = 'terrenos-v6';
+const VERSAO = 'terrenos-v7';
 const CASCA = ['./', 'index.html', 'manifest.json', 'freguesias.js',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-maskable-512.png', 'icons/apple-touch-icon.png'];
 

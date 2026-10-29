@@ -325,6 +325,14 @@ body.vtx-open #fabs { display:none; }
 <script src="https://unpkg.com/leaflet-geometryutil@0.10.3/src/leaflet.geometryutil.js"></script>
 <script src="https://unpkg.com/leaflet-control-geocoder@2.4.0/dist/Control.Geocoder.js"></script>
 <script>
+/* Ícones padrão do Leaflet (marcador/sombra). Sem isto o Leaflet pede /marker-icon.png na raiz do site → 404 no Netlify. */
+delete L.Icon.Default.prototype._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
+  iconUrl:       'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+  shadowUrl:     'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+});
+
 /* Telemóveis mais antigos não têm AbortSignal.timeout: sem isto, TODOS os pedidos com tempo limite falhavam em silêncio. */
 if (typeof AbortSignal !== 'undefined' && !AbortSignal.timeout) {
   AbortSignal.timeout = ms => {
@@ -398,15 +406,26 @@ const layersById = {};
 /* ========================================================
    MAPA
    ======================================================== */
-const PT_BOUNDS = L.latLngBounds([36.85,-9.60],[42.20,-6.15]);
-const map = L.map('map', { zoomControl:false, tap:false, maxBounds:PT_BOUNDS.pad(0.06), maxBoundsViscosity:1.0, minZoom:7 })   // tap:false: toques nativos no telemóvel (evita o atalho de toque do Leaflet no iOS).setView(CONFIG.START_VIEW, CONFIG.START_ZOOM);
-L.control.zoom({ position:'topright' }).addTo(map);
+const PT_BOUNDS = L.latLngBounds([36.85, -9.60], [42.20, -6.15]);
+const TILE_OPTS = { minZoom: 7, maxZoom: 19, bounds: PT_BOUNDS, noWrap: true };
+const map = L.map('map', {
+  zoomControl: false,
+  tap: false,              // toques nativos no telemóvel (evita o atalho de toque do Leaflet no iOS)
+  maxBounds: PT_BOUNDS.pad(0.06),
+  maxBoundsViscosity: 1,
+  minZoom: 7,
+  maxZoom: 19,
+}).setView(CONFIG.START_VIEW, CONFIG.START_ZOOM);
+L.control.zoom({ position: 'topright' }).addTo(map);
+requestAnimationFrame(() => map.invalidateSize());
 
 /* Tiles só em HTTPS. OSM (tile.openstreetmap.org) costuma devolver 403 no Netlify e deixa o mapa cinzento. */
 const osm  = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-  attribution:'© OpenStreetMap © CARTO', subdomains:'abcd', maxZoom:20 });
-const sat  = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution:'Esri', maxZoom:19 });
-const topo = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}', { attribution:'Esri', maxZoom:19 });
+  ...TILE_OPTS, maxZoom: 20, attribution: '© OpenStreetMap © CARTO', subdomains: 'abcd' });
+const sat  = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+  ...TILE_OPTS, attribution: 'Esri' });
+const topo = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}', {
+  ...TILE_OPTS, attribution: 'Esri' });
 osm.addTo(map);
 /* Malha cadastral da DGT: só as linhas das estremas, com fundo TOTALMENTE transparente.
    O cinzento opaco vem do estilo por omissão do servidor ("generic": prédios preenchidos a cinzento); transparent:true não o
@@ -424,7 +443,7 @@ let wmsErros = 0, wmsOk = false, wmsPasso = 0;
 const WL = CONFIG.DGT_WMS_LAYER;
 const wmsPassos = [
   () => wms.setParams({ layers: 'inspire:' + WL, sld_body: sldMalha('inspire:' + WL) }),
-  () => { wms.setParams({ layers: WL, sld_body: sldMalha(WL) }, true); wms._crs = L.CRS.EPSG4326; wms.wmsParams.crs = 'EPSG:4326'; wms.redraw(); },
+  () => { wms.setParams({ layers: WL, sld_body: sldMalha(WL), crs: 'EPSG:3857' }); },
   () => { delete wms.wmsParams.sld_body; wms.redraw(); toast('A usar o estilo original da DGT (pode ter preenchimento). Experimente a camada “linhas (vetorial)”.'); },
 ];
 wms.on('tileload', () => { wmsOk = true; });
@@ -450,7 +469,7 @@ const myLayer = L.featureGroup().addTo(map);   // malha com TODAS as propriedade
    Para outro ano, escolhe a release em https://livingatlas.arcgis.com/wayback e troca o número. */
 const wayback = (release, nativo) => L.tileLayer(
   `https://wayback.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/WMTS/1.0.0/GoogleMapsCompatible/MapServer/tile/${release}/{z}/{y}/{x}`,
-  { attribution:'Esri World Imagery Wayback', maxZoom:19, maxNativeZoom:nativo });   // acima do zoom nativo, o Leaflet amplia a imagem
+  { ...TILE_OPTS, attribution: 'Esri World Imagery Wayback', maxNativeZoom: nativo });
 
 const baseMaps = {                                   // botões de rádio: só um ativo de cada vez
   'Mapa Normal':     osm,
@@ -1014,7 +1033,7 @@ function showCadastroForm() {
 const stripZeros = v => String(v ?? '').trim().replace(/^0+(?=\d)/, '');
 const cacheSnic = {};
 let semCadastro = new Set();   // freguesias que o SNIC não tem no cadastro rústico (dados/indice.json)
-fetch('dados/indice.json').then(r => r.ok ? r.json() : null).then(j => { if (j) semCadastro = new Set(j.sem || []); }).catch(() => {});
+fetch('dados/indice.json').then(r => r.ok ? r.json() : null).then(j => { if (j) semCadastro = new Set(j.sem || []); }).catch(() => {}); /* ficheiro opcional; 200 vazio evita 404 */
 
 const eProxyLocal = res => !!res.headers.get('x-servidor-local') || (res.ok && /json/i.test(res.headers.get('content-type') || ''));
 const lerJSON = async res => { const t = await res.text(); try { return JSON.parse(t); } catch (_) { return t; } };
