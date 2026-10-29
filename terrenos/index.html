@@ -1,0 +1,1891 @@
+<!DOCTYPE html>
+<html lang="pt-PT">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="PWA para mapear e gerir propriedades agrícolas e florestais com cadastro da DGT.">
+<meta name="theme-color" content="#1f3d2b">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Terrenos">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Os meus terrenos</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌲</text></svg>">
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<!-- dados DGT reais (278 municípios / 3049 freguesias) -->
+<script src="freguesias.js"></script>
+
+<style>
+*, *::before, *::after { box-sizing: border-box; }
+:root {
+  --green:#1f3d2b; --green-light:#3f6b4a; --gold:#e0b84a; --gold-dark:#9a6b00;
+  --surface:#fff; --surface-dim:#f5f2ee; --text:#1a1a1a; --text-muted:#666;
+  --radius-card:20px; --radius-btn:14px;
+  --shadow-fab:0 4px 20px rgba(0,0,0,.22); --transition:.22s cubic-bezier(.4,0,.2,1);
+}
+html,body { height:100%; margin:0; padding:0; font-family:'Inter',system-ui,sans-serif; background:#111; color:var(--text); }
+#map { position:fixed; inset:0; z-index:0; }
+.leaflet-draw-toolbar,.leaflet-draw-section { display:none !important; }
+.fab { box-shadow:var(--shadow-fab); border:none; cursor:pointer; font-family:inherit; }
+.fab:active { transform:scale(.96); }
+
+#btnList {
+  position:fixed; left:14px; top:max(.85rem,env(safe-area-inset-top)); z-index:1000;
+  display:flex; align-items:center; gap:6px; height:40px; padding:0 14px;
+  border-radius:999px; background:var(--surface); color:var(--green);
+  font-size:.88rem; font-weight:600; transition:background var(--transition);
+}
+#btnList:hover { background:#eef5f0; }
+#btnSettings { position:fixed; left:14px; top:calc(max(.85rem,env(safe-area-inset-top)) + 50px); z-index:1000; width:42px; height:42px; border-radius:999px; background:var(--surface); color:var(--green); font-size:1.1rem; padding:0; }
+#btnSearch { position:fixed; left:14px; top:calc(max(.85rem,env(safe-area-inset-top)) + 100px); z-index:1000; width:42px; height:42px; border-radius:999px; background:var(--surface); font-size:1rem; padding:0; }
+body.vtx-open #btnSettings, body.vtx-open #btnSearch { display:none; }
+#searchBar { display:none; position:fixed; left:12px; right:12px; top:max(.75rem,env(safe-area-inset-top)); z-index:1250; }
+#searchBar.open { display:block; }
+.sb-row { display:flex; align-items:center; gap:4px; background:var(--surface); border-radius:16px; padding:5px 5px 5px 14px; box-shadow:var(--shadow-fab); }
+#searchInput { flex:1; min-width:0; height:46px; border:none; outline:none; background:transparent; font-family:inherit; font-size:1rem; color:var(--text); }
+.sb-row button { width:46px; height:46px; border:none; border-radius:12px; background:var(--surface-dim); font-size:1.05rem; cursor:pointer; flex-shrink:0; }
+#searchResults { list-style:none; margin:6px 0 0; padding:0; background:var(--surface); border-radius:16px; box-shadow:var(--shadow-fab); max-height:46vh; overflow-y:auto; }
+#searchResults:empty { display:none; }
+#searchResults button { display:block; width:100%; min-height:54px; padding:8px 16px; border:none; background:none; text-align:left; font-family:inherit; cursor:pointer; border-bottom:1px solid #f0ece6; }
+#searchResults button b { display:block; font-size:.95rem; color:var(--text); }
+#searchResults button span { display:block; font-size:.78rem; color:var(--text-muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.sr-msg { padding:16px; font-size:.88rem; color:var(--text-muted); }
+.geo-pin { font-size:28px; line-height:30px; text-align:center; filter:drop-shadow(0 2px 3px rgba(0,0,0,.45)); }
+.cad-tip em { display:block; margin-top:5px; color:#bdbdbd; font-size:11px; font-style:normal; }
+#count { font-size:.72rem; font-weight:700; background:var(--green); color:#fff; border-radius:999px; padding:2px 8px; }
+
+#fabs { position:fixed; right:14px; bottom:max(1rem,env(safe-area-inset-bottom)); z-index:1000; display:flex; flex-direction:column; align-items:flex-end; gap:10px; }
+#btnLocate, #btnMeasure { width:42px; height:42px; padding:0; border-radius:999px; background:var(--surface); font-size:1.15rem; display:flex; align-items:center; justify-content:center; }
+#btnLocate:hover, #btnMeasure:hover { background:#eef5f0; }
+.draw-len { font-weight:700; color:#1d4ed8; margin:-4px 0 10px; font-size:.95rem; min-height:1.2em; }
+body.drawing #btnSettings, body.drawing #btnSearch, body.drawing #searchBar { display:none !important; }
+/* contorno escuro finíssimo à volta do amarelo: lê-se bem também sobre o mapa claro (não pinta o interior) */
+.leaflet-overlay-pane svg path { filter:drop-shadow(0 0 1.2px rgba(0,0,0,.9)); }
+.wms-malha, img.wms-malha { background:transparent !important; }
+#btnAdd { height:42px; padding:0 16px; border-radius:999px; background:var(--green); color:#fff; font-size:.88rem; font-weight:600; display:flex; align-items:center; gap:6px; transition:background var(--transition),box-shadow var(--transition); }
+#btnAdd:hover { background:#2a4f38; box-shadow:0 6px 24px rgba(31,61,43,.45); }
+
+#drawBar { display:none; position:fixed; inset-x:12px; bottom:max(1rem,env(safe-area-inset-bottom)); z-index:1100; }
+#drawBar .inner { background:var(--surface); border-radius:var(--radius-card); padding:14px 14px 16px; box-shadow:var(--shadow-fab); }
+#drawBar p { font-size:.83rem; color:var(--text-muted); margin:0 0 12px; }
+.draw-btns { display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; }
+.draw-btns button { padding:14px 4px; border-radius:var(--radius-btn); font-size:.9rem; font-weight:600; background:var(--surface-dim); color:var(--text); border:none; cursor:pointer; font-family:inherit; transition:background var(--transition); }
+.draw-btns button:hover { background:#e4e0d8; }
+#drawDone { background:var(--green) !important; color:#fff !important; }
+
+#sheet { position:fixed; inset-x:0; bottom:0; z-index:1200; background:var(--surface); border-radius:24px 24px 0 0; max-height:76vh; display:flex; flex-direction:column; box-shadow:var(--shadow-fab); transform:translateY(105%); transition:transform .28s cubic-bezier(.4,0,.2,1); }
+#sheet.open { transform:translateY(0); }
+.sheet-handle { width:40px; height:4px; background:#ddd; border-radius:999px; margin:10px auto 0; flex-shrink:0; }
+.sheet-header { display:flex; align-items:center; justify-content:space-between; padding:12px 20px 10px; flex-shrink:0; }
+.sheet-header h2 { font-size:1.1rem; font-weight:700; color:var(--green); margin:0; }
+#sheetClose { width:36px; height:36px; border-radius:999px; background:var(--surface-dim); border:none; cursor:pointer; font-size:1rem; display:flex; align-items:center; justify-content:center; transition:background var(--transition); }
+#sheetClose:hover { background:#e4e0d8; }
+#list { overflow-y:auto; padding:0 12px max(1.5rem,env(safe-area-inset-bottom)); flex:1; }
+#list::-webkit-scrollbar { width:5px; }
+#list::-webkit-scrollbar-thumb { background:#ccc; border-radius:999px; }
+.list-empty { text-align:center; color:var(--text-muted); padding:36px 20px; font-size:.93rem; line-height:1.6; }
+.list-item { display:flex; align-items:center; gap:6px; border-bottom:1px solid #f0ece6; }
+.list-item:last-child { border-bottom:none; }
+.list-go { flex:1; text-align:left; padding:14px 10px; background:none; border:none; cursor:pointer; font-family:inherit; border-radius:var(--radius-btn); transition:background var(--transition); }
+.list-go:hover { background:var(--surface-dim); }
+.list-go strong { display:block; font-size:.97rem; font-weight:600; }
+.list-go span { font-size:.8rem; color:var(--text-muted); margin-top:2px; display:block; }
+.list-del { width:38px; height:38px; border-radius:999px; background:none; border:none; cursor:pointer; font-size:1rem; color:var(--text-muted); display:flex; align-items:center; justify-content:center; flex-shrink:0; transition:background var(--transition),color var(--transition); }
+.list-del:hover { background:#fee2e2; color:#b91c1c; }
+
+/* caixa de dados da propriedade selecionada (estilo do visualizador oficial) */
+.leaflet-tooltip.cad-tip { background:#3d3d3d; color:#fff; border:none; border-radius:3px; box-shadow:0 2px 10px rgba(0,0,0,.55); padding:8px 11px; font:12.5px/1.5 Inter,system-ui,sans-serif; white-space:normal; min-width:150px; max-width:250px; }
+.leaflet-tooltip.cad-tip::before { display:none; }
+.cad-tip strong { display:block; font-size:13px; margin-bottom:3px; padding-bottom:3px; border-bottom:1px solid #666; }
+.cad-tip span { color:#bdbdbd; }
+
+/* grupos, pastas e totais selecionados */
+.sel-summary { background:#f4f1ea; border-radius:10px; padding:9px 12px; margin:4px 4px 8px; font-size:.82rem; line-height:1.4; }
+.sel-summary b { color:var(--green); }
+.mini-btn { display:block; width:calc(100% - 8px); margin:0 4px 8px; min-height:48px; border:1.5px dashed var(--green); border-radius:var(--radius-btn); background:none; color:var(--green); font-family:inherit; font-weight:600; font-size:.88rem; cursor:pointer; }
+.folder.sub { border-bottom:none; margin-top:2px; }
+.folder.sub > .folder-head .folder-toggle { min-height:52px; font-size:.95rem; }
+.group-body { padding-bottom:4px; }
+.move-opt.sub { margin-left:24px; min-height:50px; }
+/* pastas e seleção (áreas de toque ≥ 48 px) */
+#list { list-style:none; margin:0; }
+.list-tools { display:flex; gap:8px; padding:0 14px 10px; flex-shrink:0; }
+.tool-btn { flex:1; min-height:50px; padding:0 10px; border-radius:var(--radius-btn); border:1.5px solid #ddd; background:var(--surface-dim); color:var(--text); font-family:inherit; font-weight:600; font-size:.88rem; cursor:pointer; }
+.tool-btn.primary { background:var(--green); border-color:var(--green); color:#fff; }
+.tool-btn:disabled { opacity:.45; cursor:not-allowed; }
+.folder { list-style:none; border-bottom:1px solid #f0ece6; }
+.folder-head { display:flex; align-items:center; }
+.folder-toggle { flex:1; min-width:0; min-height:58px; display:flex; align-items:center; gap:10px; padding:0 10px; background:none; border:none; font-family:inherit; font-size:1rem; font-weight:600; color:var(--text); text-align:left; cursor:pointer; border-radius:var(--radius-btn); }
+.folder-toggle:hover { background:var(--surface-dim); }
+.chev { display:inline-block; width:16px; font-size:1.5rem; line-height:1; color:var(--green); transition:transform .2s; }
+.folder.open .chev { transform:rotate(90deg); }
+.folder-name { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.folder-count { background:var(--surface-dim); border-radius:999px; font-size:.78rem; padding:3px 10px; color:var(--text-muted); font-weight:600; }
+.folder-act { width:48px; height:48px; flex-shrink:0; border-radius:999px; background:none; border:none; cursor:pointer; font-size:1rem; color:var(--text-muted); display:flex; align-items:center; justify-content:center; }
+.folder-act:hover { background:var(--surface-dim); }
+.folder-body { list-style:none; margin:0 0 8px 16px; padding:0 0 0 6px; border-left:3px solid var(--gold); }
+.list-empty.small { padding:16px 10px; font-size:.85rem; }
+.loose-title { list-style:none; font-size:.75rem; font-weight:700; color:var(--text-muted); text-transform:uppercase; letter-spacing:.05em; padding:16px 10px 4px; }
+.chk { position:relative; width:48px; height:48px; flex-shrink:0; display:flex; align-items:center; justify-content:center; cursor:pointer; }
+.chk input { position:absolute; opacity:0; width:100%; height:100%; margin:0; cursor:pointer; }
+.chk-box { width:26px; height:26px; border:2px solid #b9b3a8; border-radius:8px; background:#fff; display:flex; align-items:center; justify-content:center; color:#fff; font-weight:700; font-size:1rem; transition:background var(--transition),border-color var(--transition); pointer-events:none; }
+.chk input:checked + .chk-box { background:var(--green); border-color:var(--green); }
+.chk input:checked + .chk-box::after { content:'✓'; }
+.chk input:focus-visible + .chk-box { outline:3px solid var(--gold); outline-offset:2px; }
+.move-list { display:flex; flex-direction:column; gap:8px; margin-bottom:8px; max-height:48vh; overflow-y:auto; }
+.move-opt { min-height:56px; display:flex; align-items:center; gap:12px; padding:0 14px; border-radius:var(--radius-btn); border:1.5px solid #ddd; background:var(--surface-dim); color:var(--text); font-family:inherit; font-weight:600; font-size:.95rem; text-align:left; cursor:pointer; }
+.move-opt span { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.move-opt small { color:var(--text-muted); font-weight:600; }
+.move-opt.new { border-style:dashed; color:var(--green); }
+/* vértices */
+body.vtx-open #fabs { display:none; }
+#vtxPanel { position:fixed; inset-x:0; bottom:0; z-index:1150; background:var(--surface); border-radius:24px 24px 0 0; max-height:44vh; display:flex; flex-direction:column; box-shadow:var(--shadow-fab); transform:translateY(105%); transition:transform .28s cubic-bezier(.4,0,.2,1); }
+#vtxPanel.open { transform:translateY(0); }
+#vtxClose { width:36px; height:36px; border-radius:999px; background:var(--surface-dim); border:none; cursor:pointer; font-size:1rem; flex-shrink:0; }
+#vtxTitle { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.vtx-info { padding:0 20px 8px; font-size:.78rem; color:var(--text-muted); flex-shrink:0; }
+#vtxList { list-style:none; margin:0; overflow-y:auto; padding:0 12px 6px; flex:1; }
+.vtx-head { font-size:.75rem; font-weight:700; color:var(--gold-dark); text-transform:uppercase; letter-spacing:.04em; padding:10px 8px 4px; }
+.vtx-row { display:flex; align-items:center; gap:12px; padding:9px 8px; border-radius:12px; cursor:pointer; }
+.vtx-row.sel { background:#fde8ec; }
+.vtx-badge { min-width:46px; text-align:center; background:var(--green); color:#fff; font-weight:700; font-size:.88rem; padding:6px 0; border-radius:8px; }
+.vtx-row.sel .vtx-badge { background:#e11d48; }
+.vtx-coords { display:flex; flex-wrap:wrap; gap:2px 14px; font-size:.9rem; }
+.vtx-coords b { font-weight:600; font-variant-numeric:tabular-nums; }
+.vtx-coords small { flex-basis:100%; color:var(--text-muted); font-size:.74rem; font-variant-numeric:tabular-nums; }
+.vtx-actions { padding:8px 16px max(.9rem,env(safe-area-inset-bottom)); flex-shrink:0; border-top:1px solid #f0ece6; }
+#vtxCopy { width:100%; padding:12px; border-radius:var(--radius-btn); background:var(--surface-dim); border:none; font-family:inherit; font-weight:600; font-size:.9rem; cursor:pointer; }
+.vtx { overflow:visible; }
+.vtx-dot { position:absolute; left:-8px; top:-8px; width:16px; height:16px; border-radius:50%; background:var(--gold); border:3px solid var(--green); box-shadow:0 0 0 2px #fff; }
+.vtx-lbl { position:absolute; left:10px; top:-28px; background:var(--green); color:#fff; font:700 12px/1 Inter,system-ui,sans-serif; padding:5px 7px; border-radius:7px; white-space:nowrap; box-shadow:0 1px 5px rgba(0,0,0,.45); }
+.vtx.sel .vtx-dot { background:#e11d48; border-color:#fff; box-shadow:0 0 0 3px #e11d48; }
+.vtx.sel .vtx-lbl { background:#e11d48; }
+
+#modal { display:none; position:fixed; inset:0; z-index:1300; background:rgba(0,0,0,.55); backdrop-filter:blur(3px); align-items:flex-end; justify-content:center; padding:12px; }
+#modal.open { display:flex; animation:fadeIn .18s ease; }
+@media (min-height:600px) { #modal { align-items:center; } }
+@keyframes fadeIn { from{opacity:0} to{opacity:1} }
+#modalBody { background:var(--surface); width:100%; max-width:440px; border-radius:24px; padding:24px 20px max(1.5rem,env(safe-area-inset-bottom)); animation:slideUp .22s cubic-bezier(.4,0,.2,1); max-height:92vh; overflow-y:auto; }
+@keyframes slideUp { from{transform:translateY(30px);opacity:0} to{transform:translateY(0);opacity:1} }
+.modal-title { font-size:1.2rem; font-weight:700; margin:0 0 4px; }
+.modal-sub   { font-size:.88rem; color:var(--text-muted); margin:0 0 16px; line-height:1.5; }
+.modal-grid  { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+.btn-outline { padding:16px; border-radius:var(--radius-btn); background:var(--surface-dim); border:1.5px solid #ddd; font-size:.95rem; font-weight:600; font-family:inherit; cursor:pointer; transition:border-color var(--transition),background var(--transition); }
+.btn-outline:hover { background:#eaeae8; border-color:#bbb; }
+.btn-primary { padding:14px; border-radius:var(--radius-btn); background:var(--green); color:#fff; font-size:.95rem; font-weight:600; font-family:inherit; cursor:pointer; border:none; width:100%; transition:background var(--transition); margin-top:6px; }
+.btn-primary:hover { background:#2a4f38; }
+.btn-primary:disabled { background:#8aad97; cursor:not-allowed; }
+.btn-ghost { padding:11px; border-radius:var(--radius-btn); background:none; border:none; font-size:.9rem; color:var(--text-muted); font-family:inherit; cursor:pointer; width:100%; margin-top:4px; transition:background var(--transition); }
+.btn-ghost:hover { background:var(--surface-dim); }
+.field-row { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+.field-group { margin-bottom:12px; }
+.field-label { display:block; font-size:.75rem; font-weight:700; color:var(--text-muted); text-transform:uppercase; letter-spacing:.05em; margin-bottom:5px; }
+.field-input,.field-select { width:100%; border:1.5px solid #ddd; border-radius:var(--radius-btn); padding:11px 12px; font-size:.95rem; font-family:inherit; outline:none; background:var(--surface); color:var(--text); transition:border-color var(--transition); appearance:none; -webkit-appearance:none; }
+.field-select { background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23666' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E"); background-repeat:no-repeat; background-position:right 10px center; padding-right:32px; }
+.field-input:focus,.field-select:focus { border-color:var(--green); }
+.field-input:disabled,.field-select:disabled { background:#f0ece6; color:#aaa; cursor:not-allowed; }
+.field-hint { font-size:.78rem; color:var(--text-muted); margin-top:-8px; margin-bottom:10px; line-height:1.4; }
+.field-error { display:none; color:#b91c1c; font-size:.82rem; margin-bottom:10px; padding:8px 12px; background:#fee2e2; border-radius:10px; }
+
+.result-list { list-style:none; margin:0 0 12px; padding:0; max-height:260px; overflow-y:auto; border:1.5px solid #ddd; border-radius:var(--radius-btn); }
+.result-list::-webkit-scrollbar { width:4px; }
+.result-list::-webkit-scrollbar-thumb { background:#ccc; border-radius:999px; }
+.result-item { display:flex; align-items:center; gap:8px; padding:12px 14px; border-bottom:1px solid #f0ece6; cursor:pointer; transition:background var(--transition); }
+.result-item:last-child { border-bottom:none; }
+.result-item:hover,.result-item:focus { background:#eef5f0; outline:none; }
+.result-item .ri-ref { font-size:.9rem; font-weight:600; }
+.result-item .ri-area { font-size:.78rem; color:var(--text-muted); }
+
+.spinner { display:inline-block; width:16px; height:16px; border:2px solid #ddd; border-top-color:var(--green); border-radius:50%; animation:spin .7s linear infinite; vertical-align:middle; margin-right:6px; }
+@keyframes spin { to{transform:rotate(360deg)} }
+.status-badge { display:inline-block; font-size:.72rem; font-weight:700; border-radius:999px; padding:2px 8px; margin-left:6px; }
+.status-ok  { background:#d1fae5; color:#065f46; }
+.status-err { background:#fee2e2; color:#991b1b; }
+
+#toast { display:none; position:fixed; left:50%; transform:translateX(-50%); top:76px; z-index:1400; background:#14231b; color:#fff; padding:10px 22px; border-radius:999px; font-size:.88rem; font-weight:500; box-shadow:var(--shadow-fab); white-space:nowrap; max-width:90vw; text-overflow:ellipsis; overflow:hidden; }
+#tileWarn { display:none; position:fixed; inset-x:12px; top:68px; z-index:1500; background:#fef9c3; border:1px solid #e0c24a; color:#7a4f00; border-radius:16px; padding:12px 16px; font-size:.85rem; line-height:1.5; box-shadow:var(--shadow-fab); }
+.leaflet-control-layers-toggle { background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%231f3d2b' stroke-width='2' stroke-linejoin='round'%3E%3Cpath d='M12 3 2 8l10 5 10-5-10-5Z'/%3E%3Cpath d='m2 13 10 5 10-5'/%3E%3C/svg%3E") !important; background-size:26px 26px !important; width:44px !important; height:44px !important; }
+
+.combo { position:relative; margin-bottom:10px; }
+.combo-box { display:flex; align-items:center; gap:8px; min-height:46px; padding:10px 12px; background:#fff; border:1px solid #c9c9c9; border-radius:6px; cursor:pointer; font-size:.97rem; }
+.combo-text { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#777; }
+.combo.has-value .combo-text { color:#1a1a1a; }
+.combo-x { display:none; color:#666; padding:0 4px; font-size:.9rem; }
+.combo.has-value:not(.disabled) .combo-x { display:block; }
+.combo-chev { color:#4a6a8a; font-size:1.1rem; line-height:1; transition:transform .15s; }
+.combo.open .combo-chev { transform:rotate(180deg); }
+.combo.open .combo-box { border-color:var(--green); }
+.combo.disabled .combo-box { background:#f3f1ed; cursor:not-allowed; }
+.combo.disabled .combo-text { color:#aaa; }
+.combo-panel { display:none; position:absolute; left:0; right:0; top:calc(100% + 2px); z-index:20; background:#fff; border:1px solid #c9c9c9; border-radius:6px; box-shadow:0 8px 24px rgba(0,0,0,.18); padding:8px; }
+.combo.open .combo-panel { display:block; }
+.combo-search { width:100%; border:1px solid #333; border-radius:4px; padding:9px 10px; font:inherit; font-size:1rem; outline:none; margin-bottom:6px; }
+.combo-list { list-style:none; margin:0; padding:0; max-height:220px; overflow-y:auto; }
+.combo-list li { padding:11px 10px; cursor:pointer; border-radius:4px; }
+.combo-list li:hover, .combo-list li.sel { background:#f2f2f2; }
+.combo-list li.none { color:#999; cursor:default; }
+</style>
+</head>
+<body>
+
+<div id="map"></div>
+<div id="tileWarn">⚠️ O mapa não consegue carregar. Usa o Live Server ou um servidor local.</div>
+<div id="toast"></div>
+
+<button id="btnList" class="fab" aria-label="Lista de propriedades">☰ Terrenos <span id="count">0</span></button>
+
+<button id="btnSearch" class="fab" aria-label="Pesquisar localidade" title="Pesquisar localidade">🔍</button>
+<div id="searchBar" role="search">
+  <div class="sb-row">
+    <input id="searchInput" type="search" placeholder="Pesquisar localidade (cidade, vila, aldeia)…" autocomplete="off" enterkeyhint="search" aria-label="Pesquisar localidade">
+    <button id="searchGo" aria-label="Pesquisar">🔍</button>
+    <button id="searchClose" aria-label="Fechar pesquisa">✕</button>
+  </div>
+  <ul id="searchResults"></ul>
+</div>
+<button id="btnSettings" class="fab" aria-label="Definições e backup" title="Definições e backup">⚙</button>
+
+<div id="fabs">
+  <button id="btnLocate" class="fab" aria-label="A minha localização" title="A minha localização">📍</button>
+  <button id="btnMeasure" class="fab" aria-label="Medir distância" title="Medir distância">📏</button>
+  <button id="btnAdd" class="fab" aria-label="Adicionar nova propriedade">＋ Nova propriedade</button>
+</div>
+
+<div id="drawBar">
+  <div class="inner">
+    <p id="drawHint">Toque nos cantos do terreno, pela ordem certa. Mínimo 3 pontos.</p>
+    <div id="drawLen" class="draw-len"></div>
+    <div class="draw-btns">
+      <button id="drawUndo">↩ Anular</button>
+      <button id="drawCancel">✕ Cancelar</button>
+      <button id="drawDone">✓ Concluir</button>
+    </div>
+  </div>
+</div>
+
+<section id="sheet" aria-label="Propriedades guardadas">
+  <div class="sheet-handle"></div>
+  <div class="sheet-header">
+    <h2>Propriedades guardadas</h2>
+    <button id="sheetClose" aria-label="Fechar">✕</button>
+  </div>
+  <div class="list-tools">
+    <button id="btnNewFolder" class="tool-btn">🗂 Criar grupo</button>
+    <button id="btnMove" class="tool-btn primary" disabled>Mover selecionados</button>
+  </div>
+  <div class="list-tools">
+    <button id="btnExport" class="tool-btn">📤 Exportar Backup</button>
+    <button id="btnImport" class="tool-btn">📥 Importar Backup</button>
+  </div>
+  <ul id="list"></ul>
+</section>
+
+<section id="vtxPanel" aria-label="Coordenadas dos vértices">
+  <div class="sheet-handle"></div>
+  <div class="sheet-header"><h2 id="vtxTitle">Vértices</h2><button id="vtxClose" aria-label="Fechar coordenadas">✕</button></div>
+  <div id="vtxInfo" class="vtx-info"></div>
+  <ul id="vtxList"></ul>
+  <div class="vtx-actions"><button id="vtxCopy">📋 Copiar coordenadas</button></div>
+</section>
+
+<div id="modal" role="dialog" aria-modal="true">
+  <div id="modalBody"></div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
+<script src="https://unpkg.com/proj4@2.9.2/dist/proj4.js"></script>
+<script src="https://unpkg.com/proj4leaflet@1.0.2/src/proj4leaflet.js"></script>
+<script src="https://unpkg.com/leaflet-geometryutil@0.10.3/src/leaflet.geometryutil.js"></script>
+<script src="https://unpkg.com/leaflet-control-geocoder@2.4.0/dist/Control.Geocoder.js"></script>
+<script>
+/* Telemóveis mais antigos não têm AbortSignal.timeout: sem isto, TODOS os pedidos com tempo limite falhavam em silêncio. */
+if (typeof AbortSignal !== 'undefined' && !AbortSignal.timeout) {
+  AbortSignal.timeout = ms => {
+    const c = new AbortController();
+    setTimeout(() => { try { c.abort(new DOMException('Tempo esgotado', 'TimeoutError')); } catch (_) { c.abort(); } }, ms);
+    return c.signal;
+  };
+}
+
+/* ========================================================
+   CONFIG
+   ======================================================== */
+const CONFIG = {
+  STORAGE_KEY:   'terrenos.v1',
+  FOLDERS_KEY:   'terrenos.pastas.v1',   // versão antiga (migrada para grupos)
+  GROUPS_KEY:    'terrenos.grupos.v1',
+  START_VIEW:    [39.82, -7.49],
+  START_ZOOM:    8,
+  OGC_BASE:       'https://ogcapi.dgterritorio.gov.pt',   // OGC API da DGT (pygeoapi)
+  PROXY_PUBLICO:  'https://api.allorigins.win/raw?url=',   // último recurso se o pedido direto falhar por CORS/rede ('' desativa). Passa por um serviço de terceiros.
+  OGC_COLLECTION: 'cadastro',                              // id da coleção (confirmado no metadado INSPIRE: …/collections/cadastro/tiles/…)
+  DGT_WMS_URL:   'https://snicws.dgterritorio.gov.pt/geoserver/inspire/ows',   // WMS da Carta Cadastral (SNIC/DGT)
+  DGT_WMS_LAYER: 'cadastralparcel',
+  CRS84: 'http://www.opengis.net/def/crs/OGC/1.3/CRS84',
+  PAGE_SIZE: 1000,  // itens pedidos por página à OGC API
+  MAX_PAGES: 40,    // máx. de páginas por freguesia (40 x 1000)
+  SNIC_BASE:   'https://snic.dgterritorio.gov.pt/geoportal/dgt_snic2/api/app/search/cgpr',    // secções e prédios
+  SNIC_PREDIO: 'https://snic.dgterritorio.gov.pt/geoportal/dgt_snic2/api/app/search/predio',  // geometria do prédio
+};
+
+/* ========================================================
+   PT-TM06 / ETRS89 (EPSG:3763) – sistema oficial do cadastro
+   O mapa mantém o Web Mercator (EPSG:3857) porque é nele que estão as tiles
+   (OSM, Esri); a conversão WGS84<->3857 é exata e não introduz desvios.
+   O PT-TM06 é usado para: (1) converter geometrias se a API as devolver
+   em EPSG:3763, (2) calcular a área planimétrica oficial, (3) mostrar
+   coordenadas M/P.
+   ======================================================== */
+const PT_TM06_DEF = '+proj=tmerc +lat_0=39.66825833333333 +lon_0=-8.133108333333334 +k=1 +x_0=0 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs';
+proj4.defs('EPSG:3763', PT_TM06_DEF);
+const CRS_PT_TM06 = new L.Proj.CRS('EPSG:3763', PT_TM06_DEF,
+  { resolutions:[8192,4096,2048,1024,512,256,128,64,32,16,8,4,2,1,.5,.25], origin:[-127101.82,278260.37] }); // disponível se quiseres um mapa 100% em 3763 com WMS/WMTS da DGT
+const toTM06  = (lng,lat) => proj4('EPSG:4326','EPSG:3763',[lng,lat]);   // -> [M, P]
+const toWGS84 = (m,p)     => proj4('EPSG:3763','EPSG:4326',[m,p]);        // -> [lng, lat]
+
+/* ========================================================
+   LISTA DE CONCELHOS (derivada dos dados reais DGT)
+   ======================================================== */
+const CONCELHOS = Object.entries(MUNICIPIOS_LOCAL)      // nomes oficiais CAOP2025 (gerados em freguesias.js)
+  .filter(([cod]) => FREGUESIAS_LOCAL[cod])
+  .sort((x,y) => x[1].localeCompare(y[1],'pt'));
+
+/* ========================================================
+   ESTADO + localStorage
+   ======================================================== */
+let props = [];
+try { props = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEY)) || []; } catch(_) { props = []; }
+const save = () => { try { localStorage.setItem(CONFIG.STORAGE_KEY, JSON.stringify(props)); } catch(_) { toast('Não foi possível guardar.'); } };
+
+let userPos = null, drawHandler = null;
+const layersById = {};
+
+/* ========================================================
+   MAPA
+   ======================================================== */
+const PT_BOUNDS = L.latLngBounds([36.85,-9.60],[42.20,-6.15]);
+const map = L.map('map', { zoomControl:false, tap:false, maxBounds:PT_BOUNDS.pad(0.06), maxBoundsViscosity:1.0, minZoom:7 })   // tap:false: toques nativos no telemóvel (evita o atalho de toque do Leaflet no iOS).setView(CONFIG.START_VIEW, CONFIG.START_ZOOM);
+L.control.zoom({ position:'topright' }).addTo(map);
+
+const osm  = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution:'© OpenStreetMap', maxZoom:19 }).addTo(map);
+const sat  = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution:'Esri', maxZoom:19 });
+const topo = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}', { attribution:'Esri', maxZoom:19 });
+/* Malha cadastral da DGT: só as linhas das estremas, com fundo TOTALMENTE transparente.
+   O cinzento opaco vem do estilo por omissão do servidor ("generic": prédios preenchidos a cinzento); transparent:true não o
+   remove, por isso o estilo é substituído em cada pedido (SLD_BODY): contorno amarelo fluorescente (#ccff00) e fill-opacity 0.
+   - format image/png + transparent:true (uppercase:true → TRANSPARENT=TRUE, que alguns GeoServer exigem)
+   - estilo pedido por SLD: contorno vermelho fino e preenchimento com opacidade 0 (sem cinzento)
+   - pane próprio por cima do mapa/satélite e por baixo dos polígonos guardados */
+map.createPane('malhaPane'); map.getPane('malhaPane').style.zIndex = 350;
+const sldMalha = nome => `<?xml version="1.0" encoding="UTF-8"?><StyledLayerDescriptor version="1.0.0" xmlns="http://www.opengis.net/sld" xmlns:ogc="http://www.opengis.net/ogc" xmlns:xlink="http://www.w3.org/1999/xlink"><NamedLayer><Name>${nome}</Name><UserStyle><Name>malha</Name><Title>malha</Title><IsDefault>1</IsDefault><FeatureTypeStyle><Rule><Name>estremas</Name><PolygonSymbolizer><Fill><CssParameter name="fill">#ccff00</CssParameter><CssParameter name="fill-opacity">0</CssParameter></Fill><Stroke><CssParameter name="stroke">#ccff00</CssParameter><CssParameter name="stroke-width">1</CssParameter><CssParameter name="stroke-opacity">1</CssParameter></Stroke></PolygonSymbolizer></Rule></FeatureTypeStyle></UserStyle></NamedLayer></StyledLayerDescriptor>`;
+const wms = L.tileLayer.wms(CONFIG.DGT_WMS_URL, {
+  layers: CONFIG.DGT_WMS_LAYER, styles: '', format: 'image/png', transparent: true, version: '1.3.0', uppercase: true,
+  sld_body: sldMalha(CONFIG.DGT_WMS_LAYER), pane: 'malhaPane', className: 'wms-malha', opacity: 1, attribution: 'DGT / SNIC', minZoom: 13, maxZoom: 20 });
+/* se os mosaicos falharem (erro, não imagem): 1) nome da camada com prefixo; 2) pedidos em EPSG:4326; 3) estilo original */
+let wmsErros = 0, wmsOk = false, wmsPasso = 0;
+const WL = CONFIG.DGT_WMS_LAYER;
+const wmsPassos = [
+  () => wms.setParams({ layers: 'inspire:' + WL, sld_body: sldMalha('inspire:' + WL) }),
+  () => { wms.setParams({ layers: WL, sld_body: sldMalha(WL) }, true); wms._crs = L.CRS.EPSG4326; wms.wmsParams.crs = 'EPSG:4326'; wms.redraw(); },
+  () => { delete wms.wmsParams.sld_body; wms.redraw(); toast('A usar o estilo original da DGT (pode ter preenchimento). Experimente a camada “linhas (vetorial)”.'); },
+];
+wms.on('tileload', () => { wmsOk = true; });
+wms.on('tileerror', () => {
+  if (++wmsErros < 6 || wmsOk) return;
+  wmsErros = 0;
+  if (wmsPasso < wmsPassos.length) wmsPassos[wmsPasso++]();
+});
+
+let tilesOk=false, tileErrors=0;
+osm.on('tileload', ()=>{ tilesOk=true; });
+osm.on('tileerror', ()=>{ if(++tileErrors>3 && !tilesOk) document.getElementById('tileWarn').style.display='block'; });
+
+const myLayer = L.featureGroup().addTo(map);   // malha com TODAS as propriedades guardadas (overlay)
+
+/* Satélites de anos anteriores: Esri World Imagery Wayback (gratuito).
+   O número é a "release" do Wayback (cada uma é um mosaico completo publicado nessa data).
+   Para outro ano, escolhe a release em https://livingatlas.arcgis.com/wayback e troca o número. */
+const wayback = (release, nativo) => L.tileLayer(
+  `https://wayback.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/WMTS/1.0.0/GoogleMapsCompatible/MapServer/tile/${release}/{z}/{y}/{x}`,
+  { attribution:'Esri World Imagery Wayback', maxZoom:19, maxNativeZoom:nativo });   // acima do zoom nativo, o Leaflet amplia a imagem
+
+const baseMaps = {                                   // botões de rádio: só um ativo de cada vez
+  'Mapa Normal':     osm,
+  'Topográfico':     topo,
+  'Satélite Atual':  sat,
+  'Satélite 2023':   wayback(47963, 18),             // Wayback 2023-06-29
+  'Satélite 2020':   wayback(18289, 18),             // Wayback 2020-07-01
+  'Satélite 2017':   wayback(3319, 17),              // Wayback 2017-07-14
+  'Satélite 2014':   wayback(5232, 16),              // Wayback 2014-07-30
+  // Ortofotomapas da DGT (placeholder): L.tileLayer.wms('<URL WMS da DGT>', { layers:'<nome da layer>', format:'image/jpeg', version:'1.3.0' })
+};
+const malhaVet = L.featureGroup();                   // alternativa: linhas desenhadas pela app (não dependem do estilo do servidor)
+let vetAbort = null, vetBox = null;
+const overlayMaps = {                                // caixas de seleção
+  'Mostrar Todas as Propriedades': myLayer,
+  'Cadastro DGT (WMS)': wms,
+  'Cadastro DGT – linhas (zoom 16+)': malhaVet,
+};
+L.control.layers(baseMaps, overlayMaps, { position:'topright' }).addTo(map);
+
+/* ao ativar a malha, enquadra todos os terrenos no ecrã */
+let skipFit = false, idTimer = null;
+map.on('overlayadd', e => {
+  if (e.layer === wms && map.getZoom() < 13) toast('Aproxime o mapa (zoom 13 ou mais) para ver a malha do cadastro.');
+  if (e.layer === myLayer && !skipFit && myLayer.getLayers().length)
+    map.fitBounds(myLayer.getBounds(), { padding:[40,40], maxZoom:17 });
+});
+map.on('overlayremove', e => {
+  if (e.layer === myLayer) deselectProperty();
+  if (e.layer === wms || e.layer === malhaVet) { if (!map.hasLayer(wms) && !map.hasLayer(malhaVet)) clearIdentify(); }
+  if (e.layer === malhaVet) { malhaVet.clearLayers(); vetBox = null; }
+});
+map.on('overlayadd', e => { if (e.layer === malhaVet) desenharMalhaVet(); });
+map.on('moveend', () => desenharMalhaVet());
+
+/* ========================================================
+   ESTILOS DE CAMADAS
+   ======================================================== */
+const AMARELO = '#ccff00';   // amarelo fluorescente
+const STYLES = {   // desenho em curso de um terreno: só contorno
+  cadastro: { color:AMARELO, weight:3, opacity:1, fill:false, lineJoin:'round' },
+  manual:   { color:AMARELO, weight:3, opacity:1, fill:false, lineJoin:'round' },
+};
+
+/* Propriedades (guardadas e identificadas na malha): SÓ contorno amarelo fluorescente, interior 100% transparente
+   (fill ligado com opacidade 0 para o interior continuar a aceitar toques). Selecionada = contorno mais espesso. */
+const BASE_STYLE  = { color:AMARELO, weight:2,   opacity:1, fill:true, fillColor:AMARELO, fillOpacity:0, lineJoin:'round' };
+const HOVER_STYLE = { color:AMARELO, weight:3.5, opacity:1, fill:true, fillColor:AMARELO, fillOpacity:0 };
+const SEL_STYLE   = { color:AMARELO, weight:5,   opacity:1, fill:true, fillColor:AMARELO, fillOpacity:0 };
+
+/* Medições (linhas): azul, distinto dos polígonos vermelhos. Renderer canvas com tolerância = fácil de tocar com o dedo. */
+const LINE_STYLE = { color:'#1d4ed8', weight:4, opacity:.95, lineCap:'round', lineJoin:'round' };
+const LINE_HOVER = { ...LINE_STYLE, weight:6 };
+const LINE_SEL   = { ...LINE_STYLE, weight:7, opacity:1, color:'#2563eb' };
+const lineRenderer = L.canvas({ padding:.5, tolerance:14 });
+const baseStyleOf = id => { const q = props.find(x => x.id === id); return q && q.isLine ? LINE_STYLE : BASE_STYLE; };
+
+const fmtLen = m => m < 100 ? m.toFixed(1).replace('.', ',') + ' m' : m < 1000 ? Math.round(m) + ' m'
+  : (m / 1000).toLocaleString('pt-PT', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' km';
+/* comprimento no plano PT-TM06 (o sistema oficial do cadastro); coords = [[lng, lat], …] */
+function lineLengthM(coords) {
+  let t = 0, prev = null;
+  for (const [lng, lat] of coords) { const p = toTM06(lng, lat); if (prev) t += Math.hypot(p[0] - prev[0], p[1] - prev[1]); prev = p; }
+  return t;
+}
+
+/* ========================================================
+   GESTÃO DE PROPRIEDADES
+   ======================================================== */
+let selId = null, selTip = null;
+
+function tipHTML(p) {      // caixa cinzenta escura, texto branco
+  const m2  = Math.round(parseFloat(p.areaHa) * 10000);
+  const row = (k, v) => v ? `<div><span>${k}</span> ${esc(v)}</div>` : '';
+  if (p.isLine) return `<strong>📏 ${esc(p.name)}</strong>` + row('Comprimento:', fmtLen(p.lengthM || 0)) + row('Pontos:', String(p.nPoints || ''));
+  return `<strong>${esc(p.name)}</strong>` + (p.source === 'cadastro'
+    ? row('Concelho:', p.concelho) + row('Freguesia:', p.freguesia) + row('Secção:', p.seccao) + row('Prédio:', p.predio) + row('NIC:', p.ref)
+    : row('Tipo:', 'Desenhada à mão'))
+    + row('Área:', isNaN(m2) ? '' : `${m2.toLocaleString('pt-PT')} m² (${p.areaHa} ha)`);
+}
+
+/* Seleciona uma propriedade: linha espessa + caixa com os dados. Só uma de cada vez. */
+function selectProperty(id) {
+  const layer = layersById[id], p = props.find(x => x.id === id);
+  if (!layer || !p) return;
+  clearIdentify();                                                      // fecha a identificação de prédios não guardados
+  if (vtxState && vtxState.id !== id) clearVertices();                 // outro terreno: limpa os vértices
+  if (!map.hasLayer(myLayer)) { skipFit = true; map.addLayer(myLayer); skipFit = false; }   // garante que a malha está visível
+  Object.entries(layersById).forEach(([k, l]) => l.setStyle(baseStyleOf(k)));   // todos de volta ao estilo base
+  selId = id;
+  layer.setStyle(p.isLine ? LINE_SEL : SEL_STYLE); layer.bringToFront();
+  if (selTip) map.removeLayer(selTip);
+  selTip = L.tooltip({ permanent:true, direction:'top', className:'cad-tip', opacity:1, offset:[0, -6], interactive:false })
+    .setLatLng(layer.getBounds().getCenter()).setContent(tipHTML(p)).addTo(map);
+}
+function deselectProperty() {
+  if (selId && layersById[selId]) layersById[selId].setStyle(baseStyleOf(selId));
+  selId = null;
+  if (selTip) { map.removeLayer(selTip); selTip = null; }
+}
+
+function addToMap(p) {
+  const gj = p.isLine
+    ? L.geoJSON(p.geojson, { style: () => ({ ...LINE_STYLE }), renderer: lineRenderer })
+    : L.geoJSON(p.geojson, { style: () => ({ ...BASE_STYLE }) });
+  gj.on({
+    click:     e => { L.DomEvent.stopPropagation(e); selectProperty(p.id); },       // toque/clique: seleciona
+    mouseover: () => { if (selId !== p.id) gj.setStyle(p.isLine ? LINE_HOVER : HOVER_STYLE); },   // rato por cima: realce ligeiro
+    mouseout:  () => { if (selId !== p.id) gj.setStyle(baseStyleOf(p.id)); },
+  });
+  layersById[p.id] = gj;
+  myLayer.addLayer(gj);
+}
+
+/* Área em m² no plano PT-TM06 (shoelace), com buracos e multipolígonos */
+function ringAreaM2(ring) {
+  const p = ring.map(([lng,lat]) => toTM06(lng,lat));
+  let a = 0;
+  for (let i=0, j=p.length-1; i<p.length; j=i++) a += (p[j][0]+p[i][0]) * (p[j][1]-p[i][1]);
+  return Math.abs(a/2);
+}
+function geomAreaM2(geo) {
+  const polys = geo.type === 'Polygon' ? [geo.coordinates] : geo.type === 'MultiPolygon' ? geo.coordinates : [];
+  return polys.reduce((sum, rings) => sum + ringAreaM2(rings[0]) - rings.slice(1).reduce((h,r) => h + ringAreaM2(r), 0), 0);
+}
+function calcAreaHa(geojson) {
+  try { return (geomAreaM2(geojson.geometry || geojson) / 10000).toFixed(4); }
+  catch(_) { return '?'; }
+}
+
+/* ========================================================
+   LISTA DE PROPRIEDADES: GRUPOS › PASTAS › PROPRIEDADES
+   - grupo  = { id, name }                       (nível superior)
+   - pasta  = { id, name, group_id }             (dentro de um grupo)
+   - cada propriedade tem  group_id  e  folder_id  (null = sem grupo / diretamente no grupo)
+   - dados em localStorage: propriedades (STORAGE_KEY) e { groups, folders } (GROUPS_KEY)
+   - acordeão: um grupo aberto de cada vez e, dentro dele, uma pasta aberta de cada vez
+   ======================================================== */
+let groups = [], subfolders = [];
+const saveGroups = () => { try { localStorage.setItem(CONFIG.GROUPS_KEY, JSON.stringify({ groups, folders: subfolders })); } catch (_) { toast('Não foi possível guardar os grupos.'); } };
+(function carregarGrupos() {
+  try { const d = JSON.parse(localStorage.getItem(CONFIG.GROUPS_KEY)); if (d) { groups = d.groups || []; subfolders = d.folders || []; return; } } catch (_) {}
+  try {   // migração: as "pastas" da versão anterior passam a "grupos"
+    const old = JSON.parse(localStorage.getItem(CONFIG.FOLDERS_KEY)) || [];
+    if (old.length) {
+      groups = old.map(f => ({ id: f.id, name: f.name }));
+      props.forEach(p => { if (p.folder_id && groups.some(g => g.id === p.folder_id)) { p.group_id = p.folder_id; p.folder_id = null; } });
+      save(); saveGroups();
+    }
+  } catch (_) {}
+})();
+props.forEach(p => {   // coerência: referências a grupos/pastas que já não existem
+  if (!groups.some(g => g.id === p.group_id)) { p.group_id = null; p.folder_id = null; }
+  else if (p.folder_id && !subfolders.some(f => f.id === p.folder_id && f.group_id === p.group_id)) p.folder_id = null;
+});
+
+let openGroupId = null, openFolderId = null;
+const selected = new Set();   // ids das propriedades marcadas
+
+const byName     = (a, b) => a.name.localeCompare(b.name, 'pt', { sensitivity: 'base', numeric: true });   // ordem alfabética
+const groupOf    = id  => groups.find(g => g.id === id);
+const subOf      = id  => subfolders.find(f => f.id === id);
+const subsOf     = gid => subfolders.filter(f => f.group_id === gid).sort(byName);
+const inGroup    = gid => props.filter(p => p.group_id === gid);                    // tudo o que está no grupo (incl. pastas)
+const inGroupRoot= gid => props.filter(p => p.group_id === gid && !p.folder_id).sort(byName);    // diretamente no grupo
+const inSub      = fid => props.filter(p => p.folder_id === fid).sort(byName);
+const loose      = ()  => props.filter(p => !groupOf(p.group_id)).sort(byName);
+const uid        = pre => pre + Date.now() + Math.random().toString(36).slice(2, 5);
+
+const haOf  = items => items.reduce((t, p) => t + (parseFloat(p.areaHa) || 0), 0);
+const fmtHa = v => v.toLocaleString('pt-PT', { minimumFractionDigits: 2, maximumFractionDigits: 4 }) + ' ha';
+/* nº de terrenos selecionados e respetiva área total, dentro de um grupo ou de uma pasta */
+function sumHTML(items) {
+  const sel = items.filter(p => selected.has(p.id));
+  const dist = sel.reduce((t, p) => t + (p.isLine ? (p.lengthM || 0) : 0), 0);
+  return `✔ Selecionados: <b>${sel.length}</b> de ${items.length} · área total <b>${fmtHa(haOf(sel))}</b>` + (dist ? ` · distância total <b>${fmtLen(dist)}</b>` : '');
+}
+function updateSummaries() {
+  document.querySelectorAll('[data-sum-group]').forEach(e => { e.innerHTML = sumHTML(inGroup(e.dataset.sumGroup)); });
+  document.querySelectorAll('[data-sum-sub]').forEach(e => { e.innerHTML = sumHTML(inSub(e.dataset.sumSub)); });
+}
+
+function fmtDist(m) { return m < 1000 ? Math.round(m)+' m' : (m/1000).toFixed(1)+' km'; }
+
+function propItemHTML(p) {
+  const layer = layersById[p.id];
+  const dist  = (userPos && layer) ? ' · 📍 '+fmtDist(userPos.distanceTo(layer.getBounds().getCenter())) : '';
+  const sub   = p.isLine ? `📏 Medição · ${fmtLen(p.lengthM || 0)}`
+    : p.source === 'cadastro' ? `🏛 ${esc(p.concelho)} › ${esc(p.freguesia)} · Sec.${esc(p.seccao)} Nº${esc(p.predio)}`
+    : '✏️ Desenhada à mão';
+  return `<li class="list-item">
+    <label class="chk" title="Selecionar"><input type="checkbox" data-sel="${p.id}" ${selected.has(p.id) ? 'checked' : ''} aria-label="Selecionar ${esc(p.name)}"><span class="chk-box"></span></label>
+    <button class="list-go" data-go="${p.id}">
+      <strong>${p.isLine ? '📏 ' : ''}${esc(p.name)}</strong>
+      <span>${sub}${p.isLine ? '' : ' · ' + p.areaHa + ' ha'}${dist}</span>
+    </button>
+    <button class="list-del" data-del="${p.id}" aria-label="Apagar ${esc(p.name)}">🗑</button>
+  </li>`;
+}
+
+function updateMoveBtn() {
+  const b = document.getElementById('btnMove');
+  b.disabled = !selected.size;
+  b.textContent = selected.size ? `Mover selecionados (${selected.size})` : 'Mover selecionados';
+}
+
+/* só ficam selecionados os terrenos que se estão a ver (evita mover terrenos escondidos) */
+function pruneSelection() {
+  selected.forEach(id => {
+    const p = props.find(x => x.id === id);
+    const visivel = p && (!groupOf(p.group_id) || (p.group_id === openGroupId && (!p.folder_id || p.folder_id === openFolderId)));
+    if (!visivel) selected.delete(id);
+  });
+}
+
+function subHTML(f) {
+  const open = f.id === openFolderId, items = inSub(f.id);
+  return `<li class="folder sub ${open ? 'open' : ''}">
+    <div class="folder-head">
+      <button class="folder-toggle" data-subtoggle="${f.id}" aria-expanded="${open}">
+        <span class="chev">›</span><span>${open ? '📂' : '📁'}</span>
+        <span class="folder-name">${esc(f.name)}</span><span class="folder-count">${items.length}</span>
+      </button>
+      <button class="folder-act" data-rensub="${f.id}" aria-label="Renomear pasta ${esc(f.name)}">✏️</button>
+      <button class="folder-act" data-delsub="${f.id}" aria-label="Apagar pasta ${esc(f.name)}">🗑</button>
+    </div>
+    ${open ? `<div class="sel-summary" data-sum-sub="${f.id}">${sumHTML(items)}</div>
+      <ul class="folder-body">${items.length ? items.map(propItemHTML).join('')
+        : '<li class="list-empty small">Pasta vazia.<br>Marque terrenos e toque em “Mover selecionados”.</li>'}</ul>` : ''}
+  </li>`;
+}
+
+function renderList() {
+  document.getElementById('count').textContent = props.length;
+  const ul = document.getElementById('list');
+  updateMoveBtn();
+  if (!props.length && !groups.length) {
+    ul.innerHTML = `<li class="list-empty">🌱 Ainda não tem propriedades.<br>Toque em <strong>+ Nova propriedade</strong> para começar.</li>`;
+    return;
+  }
+  const gHTML = [...groups].sort(byName).map(g => {
+    const open = g.id === openGroupId, all = inGroup(g.id);
+    let body = '';
+    if (open) {
+      const subs = subsOf(g.id), root = inGroupRoot(g.id);
+      body = `<div class="group-body">
+        <div class="sel-summary" data-sum-group="${g.id}">${sumHTML(all)}</div>
+        <button class="mini-btn" data-newsub="${g.id}">＋ Nova pasta neste grupo</button>
+        <ul class="folder-body">
+          ${subs.map(subHTML).join('')}
+          ${root.length ? (subs.length ? '<li class="loose-title">Diretamente no grupo</li>' : '') + root.map(propItemHTML).join('') : ''}
+          ${!subs.length && !root.length ? '<li class="list-empty small">Grupo vazio.<br>Crie uma pasta ou mova terrenos para aqui.</li>' : ''}
+        </ul></div>`;
+    }
+    return `<li class="folder ${open ? 'open' : ''}">
+      <div class="folder-head">
+        <button class="folder-toggle" data-group="${g.id}" aria-expanded="${open}">
+          <span class="chev">›</span><span>🗂</span>
+          <span class="folder-name">${esc(g.name)}</span><span class="folder-count">${all.length}</span>
+        </button>
+        <button class="folder-act" data-rename="${g.id}" aria-label="Renomear grupo ${esc(g.name)}">✏️</button>
+        <button class="folder-act" data-delgroup="${g.id}" aria-label="Apagar grupo ${esc(g.name)}">🗑</button>
+      </div>${body}
+    </li>`;
+  }).join('');
+  const soltas = loose();
+  ul.innerHTML = gHTML + (soltas.length
+    ? `<li class="loose-title">${groups.length ? 'Sem grupo' : 'Propriedades'} · ${soltas.length}</li>` + soltas.map(propItemHTML).join('')
+    : '');
+}
+
+/* ── pedir/validar um nome (grupo ou pasta) ── */
+function promptName({ title, label, value = '', ok, taken }, onName) {
+  showModal(`
+    <p class="modal-title">${title}</p>
+    <div class="field-group" style="margin-top:14px">
+      <label class="field-label" for="fName">${label}</label>
+      <input id="fName" class="field-input" maxlength="40" value="${esc(value)}" placeholder="ex.: Herdades de Sarzedas" autocomplete="off" enterkeyhint="done">
+    </div>
+    <div id="fErr" class="field-error"></div>
+    <button id="fNameOk" class="btn-primary">${ok}</button>
+    <button class="btn-ghost mClose">Cancelar</button>`,
+  () => {
+    const inp = document.getElementById('fName');
+    const go = () => {
+      const name = inp.value.trim();
+      if (!name) return showErr('Escreva um nome.');
+      if (taken(name.toLowerCase())) return showErr('Já existe um com esse nome.');
+      hideModal(); onName(name);
+    };
+    document.getElementById('fNameOk').onclick = go;
+    inp.addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
+    inp.focus(); inp.select();
+  });
+}
+const nameTaken = (list, exceptId = null) => n => list.some(x => x.id !== exceptId && x.name.toLowerCase() === n);
+const newGroupPrompt = onGroup => promptName({ title: 'Novo grupo', label: 'Nome do grupo', ok: 'Criar grupo', taken: n => nameTaken(groups)(n) },
+  name => { const g = { id: uid('g'), name }; groups.push(g); saveGroups(); onGroup(g); });
+
+/* ── mover as propriedades selecionadas para um grupo / pasta ── */
+function moveSelected(groupId, folderId) {
+  const n = selected.size;
+  props.forEach(p => { if (selected.has(p.id)) { p.group_id = groupId; p.folder_id = folderId; } });
+  selected.clear(); save();
+  if (groupId) { openGroupId = groupId; openFolderId = folderId; }
+  hideModal(); renderList();
+  const destino = folderId ? `para a pasta “${subOf(folderId).name}”` : groupId ? `para o grupo “${groupOf(groupId).name}”` : 'para fora dos grupos';
+  toast(`${n} ${n === 1 ? 'terreno movido' : 'terrenos movidos'} ${destino}`);
+}
+function openMoveModal() {
+  if (!selected.size) return;
+  const opts = [...groups].sort(byName).map(g =>
+    `<button class="move-opt" data-g="${g.id}" data-f="">🗂 <span>${esc(g.name)}</span><small>${inGroup(g.id).length}</small></button>` +
+    subsOf(g.id).map(f => `<button class="move-opt sub" data-g="${g.id}" data-f="${f.id}">📁 <span>${esc(f.name)}</span><small>${inSub(f.id).length}</small></button>`).join('')
+  ).join('');
+  showModal(`
+    <p class="modal-title">Mover ${selected.size} ${selected.size === 1 ? 'terreno' : 'terrenos'}</p>
+    <p class="modal-sub">Escolha o grupo ou a pasta de destino.</p>
+    <div class="move-list">${opts}
+      <button class="move-opt" data-g="" data-f="">📄 <span>Sem grupo</span></button>
+      <button class="move-opt new" data-g="__new">＋ <span>Novo grupo…</span></button>
+    </div>
+    <button class="btn-ghost mClose">Cancelar</button>`,
+  () => document.querySelectorAll('.move-opt').forEach(b => b.onclick = () => {
+    if (b.dataset.g === '__new') return newGroupPrompt(g => moveSelected(g.id, null));
+    moveSelected(b.dataset.g || null, b.dataset.f || null);
+  }));
+}
+
+document.getElementById('btnNewFolder').onclick = () =>
+  newGroupPrompt(g => { openGroupId = g.id; openFolderId = null; renderList(); toast('Grupo criado'); });
+document.getElementById('btnMove').onclick = openMoveModal;
+
+document.getElementById('list').addEventListener('change', e => {
+  const c = e.target.closest('[data-sel]'); if (!c) return;
+  c.checked ? selected.add(c.dataset.sel) : selected.delete(c.dataset.sel);
+  updateMoveBtn(); updateSummaries();
+});
+
+document.getElementById('list').addEventListener('click', e => {
+  const q = s => e.target.closest(s);
+  const go = q('[data-go]'), del = q('[data-del]'),
+        tg = q('[data-group]'), ren = q('[data-rename]'), dg = q('[data-delgroup]'),
+        ns = q('[data-newsub]'), ts = q('[data-subtoggle]'), rs = q('[data-rensub]'), ds = q('[data-delsub]');
+  const reabrir = () => { pruneSelection(); renderList(); const a = document.querySelector('#list .folder.open'); if (a) a.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); };
+
+  if (go) {
+    closeSheet();
+    selectProperty(go.dataset.go);   // destaca na malha e mostra a caixa com os dados
+    showVertices(go.dataset.go);     // centra o terreno, numera os vértices e abre o painel de coordenadas
+  }
+  if (tg) {                          // acordeão dos grupos
+    openGroupId = openGroupId === tg.dataset.group ? null : tg.dataset.group; openFolderId = null; reabrir();
+  }
+  if (ts) {                          // acordeão das pastas dentro do grupo
+    openFolderId = openFolderId === ts.dataset.subtoggle ? null : ts.dataset.subtoggle; reabrir();
+  }
+  if (ns) {                          // nova pasta dentro do grupo
+    const g = groupOf(ns.dataset.newsub);
+    promptName({ title: `Nova pasta em “${g.name}”`, label: 'Nome da pasta', ok: 'Criar pasta', taken: n => nameTaken(subsOf(g.id))(n) },
+      name => { const f = { id: uid('p'), name, group_id: g.id }; subfolders.push(f); saveGroups(); openGroupId = g.id; openFolderId = f.id; renderList(); toast('Pasta criada'); });
+  }
+  if (ren) {
+    const g = groupOf(ren.dataset.rename);
+    promptName({ title: 'Renomear grupo', label: 'Nome do grupo', value: g.name, ok: 'Guardar', taken: n => nameTaken(groups, g.id)(n) },
+      name => { g.name = name; saveGroups(); renderList(); });
+  }
+  if (rs) {
+    const f = subOf(rs.dataset.rensub);
+    promptName({ title: 'Renomear pasta', label: 'Nome da pasta', value: f.name, ok: 'Guardar', taken: n => nameTaken(subsOf(f.group_id), f.id)(n) },
+      name => { f.name = name; saveGroups(); renderList(); });
+  }
+  if (dg) {
+    const g = groupOf(dg.dataset.delgroup), n = inGroup(g.id).length, np = subsOf(g.id).length;
+    if (confirm(`Apagar o grupo “${g.name}”` + (np ? ` e as suas ${np} pastas` : '') + '?' + (n ? `\nOs ${n} terrenos NÃO são apagados: ficam sem grupo.` : ''))) {
+      props.forEach(p => { if (p.group_id === g.id) { p.group_id = null; p.folder_id = null; } });
+      subfolders = subfolders.filter(f => f.group_id !== g.id); groups = groups.filter(x => x.id !== g.id);
+      if (openGroupId === g.id) { openGroupId = null; openFolderId = null; }
+      save(); saveGroups(); renderList(); toast('Grupo apagado.');
+    }
+  }
+  if (ds) {
+    const f = subOf(ds.dataset.delsub), n = inSub(f.id).length;
+    if (confirm(`Apagar a pasta “${f.name}”?` + (n ? `\nOs ${n} terrenos NÃO são apagados: ficam diretamente no grupo.` : ''))) {
+      props.forEach(p => { if (p.folder_id === f.id) p.folder_id = null; });
+      subfolders = subfolders.filter(x => x.id !== f.id);
+      if (openFolderId === f.id) openFolderId = null;
+      save(); saveGroups(); renderList(); toast('Pasta apagada.');
+    }
+  }
+  if (del) {
+    const p = props.find(x => x.id === del.dataset.del);
+    if (!p) return;
+    if (confirm(`Apagar "${p.name}"?`)) {
+      if (vtxState && vtxState.id === p.id) clearVertices();
+      if (selId === p.id) deselectProperty();
+      myLayer.removeLayer(layersById[p.id]);
+      delete layersById[p.id];
+      selected.delete(p.id);
+      props = props.filter(x => x.id !== p.id);
+      save(); renderList(); toast('Propriedade apagada.');
+    }
+  }
+});
+
+function storeProperty({ name, source, geojson, concelho='', freguesia='', seccao='', predio='', ref='', areaM2=null }) {
+  // área oficial do cadastro, se existir; senão calculada no plano PT-TM06
+  const areaHa = areaM2 ? (areaM2 / 10000).toFixed(4) : calcAreaHa(geojson);
+  const p = { id:'p'+Date.now(), name, source, concelho, freguesia, seccao, predio, ref, geojson, areaHa, created: new Date().toISOString() };
+  props.push(p); save(); addToMap(p); renderList();
+  map.fitBounds(layersById[p.id].getBounds(), {padding:[52,52], maxZoom:18});
+  selectProperty(p.id);
+  toast('✅ Propriedade guardada! Área: '+areaHa+' ha');
+}
+
+props.forEach(addToMap); renderList();
+if (props.length) { try { map.fitBounds(myLayer.getBounds(), {padding:[50,50], maxZoom:16}); } catch(_){} }
+
+/* ========================================================
+   FLUXO "NOVA PROPRIEDADE"
+   ======================================================== */
+document.getElementById('btnAdd').onclick = () => showModal(`
+  <p class="modal-title">Nova propriedade</p>
+  <p class="modal-sub">A propriedade tem registo cadastral oficial?</p>
+  <div class="modal-grid">
+    <button id="mNo"  class="btn-outline">✏️ Não — Desenhar</button>
+    <button id="mYes" class="btn-primary" style="margin-top:0">🏛 Sim — Cadastro DGT</button>
+  </div>
+  <button class="btn-ghost mClose">Cancelar</button>`,
+() => {
+  document.getElementById('mNo').onclick  = () => { hideModal(); startDrawing(); };
+  document.getElementById('mYes').onclick = showCadastroForm;
+});
+
+/* ── Formulário Cadastro: Concelho → Freguesia → Secção → Prédio ──
+   Quatro caixas pesquisáveis, como no visualizador do SNIC. */
+const el     = id => document.getElementById(id);
+const natCmp = (a, b) => String(a).localeCompare(String(b), 'pt', { numeric: true });
+
+/* Caixa com pesquisa, "✕" para limpar e seta, tal como no SNIC */
+document.addEventListener('click', e => {
+  document.querySelectorAll('.combo.open').forEach(c => { if (!c.contains(e.target)) c.classList.remove('open'); });
+});
+function makeCombo(root, { placeholder, onChange }) {
+  root.classList.add('combo', 'disabled');
+  root.innerHTML = `
+    <div class="combo-box" tabindex="0" role="combobox" aria-expanded="false">
+      <span class="combo-text"></span><span class="combo-x" title="Limpar">✕</span><span class="combo-chev">⌄</span>
+    </div>
+    <div class="combo-panel"><input class="combo-search" placeholder="Pesquisar…" autocomplete="off"><ul class="combo-list" role="listbox"></ul></div>`;
+  const box = root.querySelector('.combo-box'), text = root.querySelector('.combo-text'),
+        search = root.querySelector('.combo-search'), ul = root.querySelector('.combo-list');
+  let options = [], value = '', disabled = true;
+
+  const paint = () => {
+    const o = options.find(x => x.value === value);
+    text.textContent = value && o ? o.label : placeholder;
+    root.classList.toggle('has-value', !!(value && o)); root.classList.toggle('disabled', disabled);
+  };
+  const renderList = () => {
+    const q = search.value.trim().toLowerCase();
+    const rows = options.filter(o => !q || o.label.toLowerCase().includes(q));
+    ul.innerHTML = (rows.length ? rows.slice(0, 300).map(o =>
+        `<li role="option" data-v="${esc(o.value)}" class="${o.value === value ? 'sel' : ''}">${esc(o.label)}</li>`).join('')
+        : '<li class="none">Sem resultados</li>') +
+      (rows.length > 300 ? `<li class="none">Escreve para filtrar (a mostrar 300 de ${rows.length})</li>` : '');
+  };
+  const api = {
+    get value() { return value; },
+    setOptions(opts) { options = opts; value = ''; paint(); },
+    enable(on) { disabled = !on; if (!on) root.classList.remove('open'); paint(); },
+    open() { if (disabled) return; root.classList.add('open'); search.value = ''; renderList(); search.focus({ preventScroll: true }); },
+  };
+  box.addEventListener('click', e => {
+    if (disabled) return;
+    if (e.target.closest('.combo-x')) { value = ''; paint(); onChange(''); return; }
+    root.classList.contains('open') ? root.classList.remove('open') : api.open();
+  });
+  search.addEventListener('input', renderList);
+  ul.addEventListener('click', e => {
+    const li = e.target.closest('li[data-v]'); if (!li) return;
+    value = li.dataset.v; root.classList.remove('open'); paint(); onChange(value);
+  });
+  paint();
+  return api;
+}
+
+function showCadastroForm() {
+  showModal(`
+  <p class="modal-title">🏛 Pesquisa no Cadastro</p>
+  <p class="modal-sub">Escolhe concelho, freguesia, secção e prédio. As listas vêm do SNIC (DGT).</p>
+  <div id="cCon"></div><div id="cFrg"></div><div id="cSec"></div><div id="cPre"></div>
+  <div id="fStatus" class="field-hint" style="margin-top:0"></div>
+  <div id="fErr" class="field-error"></div>
+  <button id="fGo" class="btn-primary" disabled>📍 Mostrar prédio no mapa</button>
+  <button class="btn-ghost mClose">Cancelar</button>`,
+  () => {
+    const btnGo = el('fGo'), status = el('fStatus'), spin = '<span class="spinner"></span>';
+    let freg = 0, sec = 0;   // "tokens" para ignorar respostas antigas
+
+    const cPre = makeCombo(el('cPre'), { placeholder: 'Prédio ?', onChange: v => { btnGo.disabled = v === ''; } });
+
+    const cSec = makeCombo(el('cSec'), { placeholder: 'Secção ?', onChange: async v => {
+      clearErr(); btnGo.disabled = true; cPre.setOptions([]); cPre.enable(false);
+      const token = ++sec; if (!v) return;
+      status.innerHTML = spin + 'A ler os prédios da secção…';
+      try {
+        const list = await snicPredios(cFrg.value, v);
+        if (token !== sec) return;
+        cPre.setOptions(list.map(p => ({ value: p, label: p }))); cPre.enable(true);
+        status.textContent = `${list.length} prédios na secção ${v}.`; cPre.open();
+      } catch (err) { if (token === sec) { status.textContent = ''; showErr(err.message); } }
+    } });
+
+    const resetBelow = () => { sec++; cSec.setOptions([]); cSec.enable(false); cPre.setOptions([]); cPre.enable(false); btnGo.disabled = true; };
+
+    const cFrg = makeCombo(el('cFrg'), { placeholder: 'Freguesia ?', onChange: async v => {
+      clearErr(); const token = ++freg; status.textContent = ''; resetBelow(); if (!v) return;
+      status.innerHTML = spin + 'A ler as secções…';
+      try {
+        const secs = await snicSeccoes(v);
+        if (token !== freg) return;
+        if (!secs.length) { status.textContent = ''; return showErr('Esta freguesia não tem prédios no cadastro rústico (CGPR) do SNIC.'); }
+        cSec.setOptions(secs.map(s => ({ value: s, label: s }))); cSec.enable(true);
+        status.textContent = `${secs.length} secções.`; cSec.open();
+      } catch (err) { if (token === freg) { status.textContent = ''; showErr(err.message); } }
+    } });
+
+    const cCon = makeCombo(el('cCon'), { placeholder: 'Concelho ?', onChange: v => {
+      freg++; clearErr(); status.textContent = ''; resetBelow();
+      cFrg.setOptions((FREGUESIAS_LOCAL[v] || []).map(([d, n]) => ({ value: d, label: n + (semCadastro.has(d) ? ' (sem cadastro)' : '') })));
+      cFrg.enable(!!v); if (v) cFrg.open();
+    } });
+    cCon.setOptions(CONCELHOS.map(([c, n]) => ({ value: c, label: n + ((FREGUESIAS_LOCAL[c] || []).every(([d]) => semCadastro.has(d)) ? ' (sem cadastro)' : '') }))); cCon.enable(true);
+
+    btnGo.onclick = async () => {
+      clearErr();
+      const dtmnfr = cFrg.value, seccao = cSec.value, predio = cPre.value; if (!predio) return;
+      btnGo.disabled = true; btnGo.innerHTML = spin + 'A obter o prédio…';
+      try {
+        const { feat, nic, areaM2 } = await snicGeometria(dtmnfr, seccao, predio);
+        const limpa = t => t.replace(/ \(sem cadastro\)$/, '');
+        const frgNome = limpa(el('cFrg').querySelector('.combo-text').textContent), conNome = limpa(el('cCon').querySelector('.combo-text').textContent);
+        hideModal();
+        storeProperty({ name: `${frgNome} – Sec.${seccao} Nº${predio}`, source: 'cadastro', geojson: feat,
+                        concelho: conNome, freguesia: frgNome, seccao, predio, ref: nic, areaM2 });
+      } catch (err) {
+        btnGo.disabled = false; btnGo.innerHTML = '📍 Mostrar prédio no mapa'; showErr(err.message);
+      }
+    };
+  });
+}
+
+/* ========================================================
+   SERVIÇO DO SNIC (DGT) – Cadastro Geométrico da Propriedade Rústica
+   seccoes?filter=<DICOFRE>                     -> [{"seccao":"AB"}, ...]
+   predios?dicofre=<DICOFRE>&seccao=<secção>    -> lista de prédios da secção
+   cgpr?filter=<DICOFRE>_<secção>_<prédio>      -> geometria do prédio
+   (o servidor permite pedidos de outros sites: Access-Control-Allow-Origin: *)
+   ======================================================== */
+const stripZeros = v => String(v ?? '').trim().replace(/^0+(?=\d)/, '');
+const cacheSnic = {};
+let semCadastro = new Set();   // freguesias que o SNIC não tem no cadastro rústico (dados/indice.json)
+fetch('dados/indice.json').then(r => r.ok ? r.json() : null).then(j => { if (j) semCadastro = new Set(j.sem || []); }).catch(() => {});
+
+let snicLocal = null;   // null = ainda não sei; true = via proxy do mesmo site (servidor.py ou _redirects do Netlify); false = direto ao SNIC
+/* é o NOSSO proxy? (servidor.py envia X-Servidor-Local; o Netlify devolve o JSON do SNIC). Live Server/Netlify sem regras devolvem 404/HTML. */
+const eProxyLocal = res => !!res.headers.get('x-servidor-local') || (res.ok && /json/i.test(res.headers.get('content-type') || ''));
+const lerJSON = async res => { const t = await res.text(); try { return JSON.parse(t); } catch (_) { return t; } };
+
+async function snicGet(path, params, predio = false) {
+  const qs = new URLSearchParams(params);
+  const local = predio ? '/snicp' : '/snic', direto = predio ? CONFIG.SNIC_PREDIO : CONFIG.SNIC_BASE;
+  const urlDireto = `${direto}/${path}?${qs}`;
+  const bases = snicLocal === null ? [local, direto] : [snicLocal ? local : direto];
+  let falha;
+  for (const base of bases) {
+    const url = `${base}/${path}?${qs}`;
+    let res;
+    try { res = await fetch(url, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(40000) }); }
+    catch (err) { falha = err; continue; }                     // rede / CORS: tenta o seguinte
+    if (snicLocal === null && base === local) {
+      if (!eProxyLocal(res)) continue;                         // não há proxy neste site: vai ao SNIC diretamente
+      snicLocal = true;
+    }
+    if (!res.ok) {
+      const t = (await res.text()).trim();
+      const e = new Error(`Erro do SNIC (${res.status}) em ${url.replace(/^https?:\/\/[^/]+/, '')}` + (t && t[0] !== '<' ? ' – ' + t.slice(0, 100) : ''));
+      e.status = res.status; throw e;
+    }
+    if (snicLocal === null) snicLocal = false;
+    return lerJSON(res);
+  }
+  // Recurso: o pedido nem chegou a ser respondido (CORS/rede, típico no telemóvel) -> proxy público
+  if (CONFIG.PROXY_PUBLICO && !(falha && falha.name === 'TimeoutError')) {
+    try {
+      const res = await fetch(CONFIG.PROXY_PUBLICO + encodeURIComponent(urlDireto), { signal: AbortSignal.timeout(40000) });
+      if (res.ok) return lerJSON(res);
+    } catch (_) { /* cai no erro abaixo */ }
+  }
+  throw new Error(falha && falha.name === 'TimeoutError' ? 'O SNIC demorou demasiado a responder. Tenta novamente.'
+    : 'Sem ligação ao SNIC (rede ou bloqueio do navegador). Verifique a ligação e tente de novo.');
+}
+
+/* Dados locais (dados/<freguesia>.json, gerados por baixar_snic.py): lista de secções e prédios sem rede */
+async function dadosLocais(dtmnfr) {
+  const k = 'L' + dtmnfr;
+  if (!(k in cacheSnic)) {
+    try { const r = await fetch(`dados/${dtmnfr}.json`); cacheSnic[k] = r.ok ? ((await r.json()).s || null) : null; }
+    catch (_) { cacheSnic[k] = null; }
+  }
+  return cacheSnic[k];
+}
+
+/* Valor "útil" de um item da lista: texto/número, ou o campo do objeto com o nº/nome do prédio */
+function itemValue(it, hint) {
+  if (it == null) return '';
+  if (typeof it !== 'object') return String(it).trim();
+  const key = Object.keys(it).find(k => hint.test(k)) || Object.keys(it).find(k => typeof it[k] !== 'object');
+  return key ? String(it[key]).trim() : '';
+}
+const listOf = d => Array.isArray(d) ? d : (d && typeof d === 'object' ? Object.values(d).find(Array.isArray) : null);
+
+async function snicSeccoes(dtmnfr) {
+  const loc = await dadosLocais(dtmnfr);
+  if (loc) return Object.keys(loc).sort(natCmp);
+  if (cacheSnic['s' + dtmnfr]) return cacheSnic['s' + dtmnfr];
+  const d = await snicGet('seccoes', { filter: dtmnfr });
+  const arr = listOf(d);
+  if (!arr) throw new Error('Resposta inesperada do SNIC: ' + JSON.stringify(d).slice(0, 120));
+  const secs = [...new Set(arr.map(x => itemValue(x, /seccao/i).toUpperCase()).filter(Boolean))].sort(natCmp);
+  return (cacheSnic['s' + dtmnfr] = secs);
+}
+
+async function snicPredios(dtmnfr, seccao) {
+  const loc = await dadosLocais(dtmnfr);
+  if (loc && loc[seccao]) return loc[seccao];
+  const key = `p${dtmnfr}_${seccao}`;
+  if (cacheSnic[key]) return cacheSnic[key];
+  let d, ultimo;
+  for (const nome of ['seccao', 'secao', 'sec']) {      // nome do parâmetro (o 1.º é o esperado)
+    try { d = await snicGet('predios', { dicofre: dtmnfr, [nome]: seccao }); ultimo = null; if (listOf(d)) break; }
+    catch (err) { ultimo = err; }
+  }
+  if (ultimo) throw ultimo;
+  const arr = listOf(d);
+  if (!arr) throw new Error('Resposta inesperada do SNIC (prédios): ' + JSON.stringify(d).slice(0, 120));
+  const preds = [...new Set(arr
+    .filter(x => typeof x !== 'object' || !x || !Object.keys(x).some(k => /seccao/i.test(k)) ||
+                 String(x[Object.keys(x).find(k => /seccao/i.test(k))]).toUpperCase() === seccao)   // só desta secção
+    .map(x => itemValue(x, /^(predio|numero|nr?_?predio|artigo|num)/i)).filter(Boolean))].sort(natCmp);
+  if (!preds.length) throw new Error('Esta secção não tem prédios na lista do SNIC.');
+  return (cacheSnic[key] = preds);
+}
+
+/* ── Geometria: aceita GeoJSON (Feature/FeatureCollection/Polygon/MultiPolygon) ou WKT, em lon/lat, PT-TM06 ou Web Mercator ── */
+function wktToGeometry(w) {
+  const t = String(w).trim().replace(/^SRID=\d+;/i, '');
+  const m = t.match(/^(MULTIPOLYGON|POLYGON)\s*(?:Z|M|ZM)?\s*(\([\s\S]*\))\s*$/i);
+  if (!m) return null;
+  const pt   = s => s.trim().split(/\s+/).slice(0, 2).map(Number);
+  const ring = s => s.split(',').map(pt);
+  const body = m[2].trim().slice(1, -1).trim();
+  if (m[1].toUpperCase() === 'POLYGON')
+    return { type: 'Polygon', coordinates: [...body.matchAll(/\(([^()]+)\)/g)].map(x => ring(x[1])) };
+  const polys = body.split(/\)\s*\)\s*,\s*\(\s*\(/).map(p => p.replace(/^\s*\(\s*\(/, '').replace(/\)\s*\)\s*$/, ''));
+  return { type: 'MultiPolygon', coordinates: polys.map(p => p.split(/\)\s*,\s*\(/).map(ring)) };
+}
+function collectGeoms(d, out, depth = 0) {
+  if (!d || depth > 7) return;
+  if (typeof d === 'string') {
+    const t = d.trim();
+    if (/^(SRID=\d+;)?(MULTI)?POLYGON/i.test(t)) { const g = wktToGeometry(t); if (g) out.push(g); }
+    else if (t[0] === '{' || t[0] === '[') { try { collectGeoms(JSON.parse(t), out, depth + 1); } catch (_) {} }
+    return;
+  }
+  if (Array.isArray(d)) return d.forEach(x => collectGeoms(x, out, depth + 1));
+  if (typeof d !== 'object') return;
+  if ((d.type === 'Polygon' || d.type === 'MultiPolygon') && Array.isArray(d.coordinates)) return void out.push(d);
+  Object.values(d).forEach(v => collectGeoms(v, out, depth + 1));
+}
+function findNics(d, out = [], depth = 0) {
+  if (!d || typeof d !== 'object' || depth > 7) return out;
+  for (const [k, v] of Object.entries(d)) {
+    if (/^nic$/i.test(k) && v) out.push(String(v)); else findNics(v, out, depth + 1);
+  }
+  return out;
+}
+
+/* Converte para WGS84 lon/lat se vier em PT-TM06 (EPSG:3763) ou Web Mercator (EPSG:3857) */
+function ensureWGS84(feat) {
+  const probe = (function first(c) { return typeof c[0] === 'number' ? c : first(c[0]); })(feat.geometry.coordinates);
+  let conv = null;
+  if (Math.abs(probe[0]) > 180 || Math.abs(probe[1]) > 90) {
+    conv = Math.abs(probe[1]) > 1e6 ? c => proj4('EPSG:3857', 'EPSG:4326', [c[0], c[1]]) : c => toWGS84(c[0], c[1]);
+  } else if (probe[0] > 35 && probe[0] < 44 && probe[1] > -11 && probe[1] < -5) {
+    conv = c => [c[1], c[0]];                                    // lat/lon trocados
+  }
+  if (!conv) return feat;
+  const walk = c => typeof c[0] === 'number' ? conv(c) : c.map(walk);
+  return { ...feat, geometry: { ...feat.geometry, coordinates: walk(feat.geometry.coordinates) } };
+}
+
+function somaAreas(d, depth = 0) {      // soma "area_m2" (área oficial) de todos os prédios da resposta
+  if (!d || typeof d !== 'object' || depth > 7) return 0;
+  return Object.entries(d).reduce((t, [k, v]) => t + (/^area_m2$/i.test(k) ? (Number(v) || 0) : somaAreas(v, depth + 1)), 0);
+}
+
+async function snicGeometria(dtmnfr, seccao, predio) {
+  // …/search/predio/cgpr?filter=<freguesia>_<secção>_<prédio>  ->  { nic, area_m2, wkt_3857, ... }
+  const d = await snicGet('cgpr', { filter: `${dtmnfr}_${seccao}_${predio}` }, true);
+  const geoms = []; collectGeoms(d, geoms);
+  const uniq = [...new Map(geoms.map(g => [JSON.stringify(g), g])).values()];
+  if (!uniq.length) {
+    console.log('Resposta do SNIC (cgpr):', d);
+    throw new Error('O SNIC não devolveu uma geometria reconhecível: ' + JSON.stringify(d).slice(0, 160));
+  }
+  // um mesmo nº de prédio pode ter várias parcelas: junta-as num só prédio
+  const polys = uniq.flatMap(g => g.type === 'Polygon' ? [g.coordinates] : g.coordinates);
+  const geometry = polys.length === 1 ? { type: 'Polygon', coordinates: polys[0] } : { type: 'MultiPolygon', coordinates: polys };
+  const nics = [...new Set(findNics(d))], areaM2 = somaAreas(d);
+  return { feat: ensureWGS84({ type: 'Feature', properties: { nic: nics.join(', '), parcelas: polys.length, area_m2: areaM2 }, geometry }),
+           nic: nics.join(', '), areaM2: areaM2 || null };
+}
+
+/* ========================================================
+   DESENHO MANUAL
+   ======================================================== */
+let drawKind = 'polygon';   // 'polygon' (terreno) | 'line' (medição)
+function startDrawing(kind = 'polygon') {
+  drawKind = kind;
+  document.body.classList.add('drawing');
+  document.getElementById('fabs').style.display    = 'none';
+  document.getElementById('btnList').style.display = 'none';
+  document.getElementById('drawBar').style.display = 'block';
+  document.getElementById('drawHint').textContent = kind === 'line'
+    ? 'Toque ao longo do percurso, ponto a ponto. Mínimo 2 pontos. A distância atualiza-se à medida que desenha.'
+    : 'Toque nos cantos do terreno, pela ordem certa. Mínimo 3 pontos.';
+  document.getElementById('drawLen').textContent = '';
+  const icons = {
+    icon:      new L.DivIcon({ iconSize:new L.Point(18,18), className:'leaflet-div-icon leaflet-editing-icon' }),
+    touchIcon: new L.DivIcon({ iconSize:new L.Point(26,26), className:'leaflet-div-icon leaflet-editing-icon leaflet-touch-icon' }),
+  };
+  drawHandler = kind === 'line'
+    ? new L.Draw.Polyline(map, { shapeOptions: { color:'#1d4ed8', weight:4 }, showLength:true, metric:true, feet:false, nautic:false, ...icons })
+    : new L.Draw.Polygon(map, { allowIntersection:false, showArea:false, shapeOptions: STYLES.manual, ...icons });
+  drawHandler.enable();
+}
+function stopDrawing() {
+  if (drawHandler) { drawHandler.disable(); drawHandler=null; }
+  document.body.classList.remove('drawing');
+  document.getElementById('fabs').style.display    = '';
+  document.getElementById('btnList').style.display = '';
+  document.getElementById('drawBar').style.display = 'none';
+}
+function updateDrawLen() {     // distância acumulada, enquanto se desenha uma linha
+  const box = document.getElementById('drawLen');
+  const pts = drawHandler && drawKind === 'line' ? (drawHandler._markers || []).map(m => m.getLatLng()) : [];
+  box.textContent = pts.length > 1 ? `📏 Distância: ${fmtLen(lineLengthM(pts.map(q => [q.lng, q.lat])))}` : '';
+}
+map.on('draw:drawvertex', updateDrawLen);
+document.getElementById('btnMeasure').onclick = () => { closeSheet(); clearVertices(); clearIdentify(); startDrawing('line'); };
+document.getElementById('drawUndo').onclick   = () => { drawHandler?.deleteLastVertex(); updateDrawLen(); };
+document.getElementById('drawCancel').onclick = stopDrawing;
+document.getElementById('drawDone').onclick   = () => {
+  if (!drawHandler) return;
+  const min = drawKind === 'line' ? 2 : 3;
+  if (!drawHandler._markers || drawHandler._markers.length < min) return toast(`Marque pelo menos ${min} pontos.`);
+  drawHandler.completeShape();
+};
+
+function storeLine({ name, geojson }) {
+  const coords = geojson.geometry.coordinates, lengthM = lineLengthM(coords);
+  const p = { id:'l'+Date.now(), name, source:'line', isLine:true, lengthM, nPoints:coords.length, geojson, group_id:null, folder_id:null, created:new Date().toISOString() };
+  props.push(p); save(); addToMap(p); renderList();
+  map.fitBounds(layersById[p.id].getBounds(), { padding:[52,52], maxZoom:18 });
+  selectProperty(p.id);
+  toast(`📏 ${name}: ${fmtLen(lengthM)}`);
+}
+
+map.on(L.Draw.Event.CREATED, e => {
+  const geojson = e.layer.toGeoJSON(); stopDrawing();
+  if (e.layerType === 'polyline') {          // medição de distância
+    const len = fmtLen(lineLengthM(geojson.geometry.coordinates));
+    return showModal(`
+      <p class="modal-title">📏 Guardar medição</p>
+      <p class="modal-sub">Comprimento total: <b>${len}</b>. Dê um nome a esta medição.</p>
+      <div class="field-group"><label class="field-label" for="nName">Nome</label>
+      <input id="nName" class="field-input" placeholder="ex.: Caminho até à nascente" maxlength="60"></div>
+      <button id="nSave" class="btn-primary">💾 Guardar</button>
+      <button id="nDrop" class="btn-ghost">Descartar medição</button>`,
+    () => {
+      document.getElementById('nName').focus();
+      document.getElementById('nSave').onclick = () => {
+        const name = document.getElementById('nName').value.trim() || 'Medição sem nome';
+        hideModal(); storeLine({ name, geojson });
+      };
+      document.getElementById('nDrop').onclick = hideModal;
+    });
+  }
+  showModal(`
+    <p class="modal-title">Dar nome ao terreno</p>
+    <p class="modal-sub">A propriedade foi desenhada à mão. Dá-lhe um nome para a identificar.</p>
+    <div class="field-group"><label class="field-label" for="nName">Nome</label>
+    <input id="nName" class="field-input" placeholder="ex.: Pinhal da Serra" maxlength="60"></div>
+    <button id="nSave" class="btn-primary">💾 Guardar</button>
+    <button id="nDrop" class="btn-ghost">Descartar desenho</button>`,
+  () => {
+    document.getElementById('nName').focus();
+    document.getElementById('nSave').onclick = () => {
+      const name = document.getElementById('nName').value.trim() || 'Terreno sem nome';
+      hideModal(); storeProperty({ name, source:'manual', geojson });
+    };
+    document.getElementById('nDrop').onclick = hideModal;
+  });
+});
+
+/* ========================================================
+   GEOLOCALIZAÇÃO
+   ======================================================== */
+let meMarker=null, meCircle=null;
+function locate(silent) {
+  if (!navigator.geolocation) { if(!silent) toast('Dispositivo não suporta geolocalização.'); return; }
+  if (!silent) toast('📡 A obter localização…');
+  navigator.geolocation.getCurrentPosition(
+    pos => {
+      userPos = L.latLng(pos.coords.latitude, pos.coords.longitude);
+      if (!PT_BOUNDS.contains(userPos)) { if(!silent) toast('Fora de Portugal continental.'); return; }
+      if (meMarker) { meMarker.setLatLng(userPos); meCircle.setLatLng(userPos).setRadius(pos.coords.accuracy); }
+      else {
+        meCircle = L.circle(userPos, { radius:pos.coords.accuracy, color:'#2563eb', weight:1, fillOpacity:.12 }).addTo(map);
+        meMarker = L.circleMarker(userPos, { radius:8, color:'#fff', weight:3, fillColor:'#2563eb', fillOpacity:1 }).addTo(map);
+      }
+      if (!silent || !props.length) map.setView(userPos, Math.max(map.getZoom(),15));
+      renderList();
+    },
+    err => {
+      if (silent) return;
+      toast(err.code===1 ? 'Localização bloqueada nas definições do browser.' : 'Não foi possível obter a localização.');
+    },
+    { enableHighAccuracy:true, timeout:15000, maximumAge:5000 }
+  );
+}
+document.getElementById('btnLocate').onclick = () => locate(false);
+locate(true);
+
+/* ========================================================
+   VÉRTICES DO TERRENO – marcadores V1, V2, … no mapa + lista de coordenadas
+   A numeração da lista e a dos marcadores vêm do MESMO array (vtxState.items),
+   por isso o "V3" do painel é sempre o "V3" que se vê no mapa.
+   ======================================================== */
+const vtxLayer = L.layerGroup().addTo(map);
+let vtxState = null;     // { id, name, items:[{ n, ll, marker, grupo }] }
+
+/* getLatLngs() devolve níveis diferentes (polígono simples / com buracos / multipolígono).
+   Normaliza para: lista de partes; cada parte = [contorno, buraco, buraco…] */
+function polygonParts(ll) {
+  if (!ll || !ll.length) return [];
+  if (ll[0] instanceof L.LatLng) return [[ll]];
+  if (ll[0][0] instanceof L.LatLng) return [ll];
+  return ll.flatMap(polygonParts);
+}
+function polygonLayersOf(layer, out = []) {
+  if (layer instanceof L.Polyline) out.push(layer);        // inclui polígonos (L.Polygon herda de L.Polyline) e linhas
+  else if (layer.eachLayer) layer.eachLayer(l => polygonLayersOf(l, out));
+  return out;
+}
+const sameLL = (a, b) => a.lat === b.lat && a.lng === b.lng;
+
+/* Constrói a lista numerada de vértices (V1…Vn, contínua em todas as partes do terreno) */
+function buildVertices(layer) {
+  const linePartsOf = ll => ll[0] instanceof L.LatLng ? [[ll]] : ll.map(seg => [seg]);
+  const parts = polygonLayersOf(layer).flatMap(pl => pl instanceof L.Polygon
+    ? polygonParts(pl.getLatLngs()).map(rings => ({ rings, poly: true }))
+    : linePartsOf(pl.getLatLngs()).map(rings => ({ rings, poly: false })));
+  const items = []; let n = 0;
+  parts.forEach((part, pi) => part.rings.forEach((ring, ri) => {
+    const pts = part.poly && ring.length > 1 && sameLL(ring[0], ring[ring.length - 1]) ? ring.slice(0, -1) : ring;   // polígonos: sem o ponto de fecho repetido
+    const grupo = (parts.length > 1 ? `${part.poly ? 'Parcela' : 'Troço'} ${pi + 1}` : '') + (ri > 0 ? (parts.length > 1 ? ' – ' : '') + `Buraco ${ri}` : '');
+    pts.forEach(ll => items.push({ n: ++n, ll, grupo }));
+  }));
+  return items;
+}
+
+const fmtLL = v => v.toFixed(6);                       // 6 casas ≈ 0,1 m
+const fmtTM = ll => { const [m, p] = toTM06(ll.lng, ll.lat); return { m: m.toFixed(2), p: p.toFixed(2) }; };
+
+function vertexIcon(n, sel) {
+  return L.divIcon({ className: 'vtx' + (sel ? ' sel' : ''), iconSize: [0, 0], iconAnchor: [0, 0],
+                     html: `<span class="vtx-dot"></span><span class="vtx-lbl">V${n}</span>` });
+}
+
+function showVertices(id) {
+  clearVertices();
+  const layer = layersById[id], p = props.find(x => x.id === id);
+  if (!layer || !p) return;
+  const items = buildVertices(layer);
+  if (!items.length) return toast('Este terreno não tem vértices para mostrar.');
+
+  // marcadores numerados, exatamente em cima de cada vértice
+  items.forEach(it => {
+    it.marker = L.marker(it.ll, { icon: vertexIcon(it.n), keyboard: false, zIndexOffset: 1000 })
+      .on('click', e => { L.DomEvent.stopPropagation(e); selectVertex(it.n, false); })
+      .addTo(vtxLayer);
+  });
+  vtxState = { id, name: p.name, items, sel: null };
+
+  // painel inferior com a lista (mesma numeração)
+  let ultimoGrupo = null;
+  el('vtxList').innerHTML = items.map(it => {
+    const head = it.grupo !== ultimoGrupo && it.grupo ? `<li class="vtx-head">${esc(it.grupo)}</li>` : '';
+    ultimoGrupo = it.grupo;
+    const tm = fmtTM(it.ll);
+    return head + `<li class="vtx-row" data-n="${it.n}">
+      <span class="vtx-badge">V${it.n}</span>
+      <div class="vtx-coords"><b>Lat: ${fmtLL(it.ll.lat)}</b><b>Lng: ${fmtLL(it.ll.lng)}</b>
+        <small>PT-TM06: M ${tm.m} · P ${tm.p}</small></div>
+    </li>`;
+  }).join('');
+  el('vtxTitle').textContent = `Vértices · ${p.name}`;
+  el('vtxInfo').textContent = `${items.length} vértices, ${p.isLine ? 'pela ordem do traçado' : 'pela ordem do contorno'}. Toque num vértice (no mapa ou na lista) para o localizar.`;
+  document.body.classList.add('vtx-open');
+  el('vtxPanel').classList.add('open');
+
+  // centra o terreno na parte do mapa que fica acima do painel
+  const h = el('vtxPanel').offsetHeight;
+  map.fitBounds(layer.getBounds(), { paddingTopLeft: [36, 70], paddingBottomRight: [36, h + 24], maxZoom: 19 });
+}
+
+function selectVertex(n, centrar = true) {
+  if (!vtxState) return;
+  vtxState.items.forEach(it => it.marker.setIcon(vertexIcon(it.n, it.n === n)));
+  const it = vtxState.items.find(x => x.n === n); if (!it) return;
+  it.marker.setZIndexOffset(3000);
+  vtxState.sel = n;
+  document.querySelectorAll('#vtxList .vtx-row').forEach(r => r.classList.toggle('sel', +r.dataset.n === n));
+  const row = document.querySelector(`#vtxList .vtx-row[data-n="${n}"]`);
+  if (row) row.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  if (centrar) {   // põe o vértice na parte visível do mapa, acima do painel
+    const z = map.getZoom(), pt = map.project(it.ll, z).add([0, el('vtxPanel').offsetHeight / 2]);
+    map.panTo(map.unproject(pt, z));
+  }
+}
+
+function clearVertices() {
+  vtxLayer.clearLayers();
+  vtxState = null;
+  document.body.classList.remove('vtx-open');
+  const panel = el('vtxPanel'); if (panel) panel.classList.remove('open');
+}
+
+function copyVertices() {
+  if (!vtxState) return;
+  const txt = `${vtxState.name}\n` + vtxState.items.map(it => {
+    const tm = fmtTM(it.ll);
+    return `V${it.n} - Lat: ${fmtLL(it.ll.lat)}, Lng: ${fmtLL(it.ll.lng)} (PT-TM06 M ${tm.m}, P ${tm.p})`;
+  }).join('\n');
+  const ok = () => toast('Coordenadas copiadas');
+  const fallback = () => {
+    const ta = document.createElement('textarea'); ta.value = txt; ta.style.cssText = 'position:fixed;opacity:0';
+    document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); ok(); } catch (_) { toast('Não foi possível copiar.'); }
+    ta.remove();
+  };
+  navigator.clipboard ? navigator.clipboard.writeText(txt).then(ok, fallback) : fallback();
+}
+
+el('vtxList').addEventListener('click', e => { const r = e.target.closest('.vtx-row'); if (r) selectVertex(+r.dataset.n, true); });
+el('vtxClose').onclick = clearVertices;
+el('vtxCopy').onclick  = copyVertices;
+
+/* ========================================================
+   IDENTIFICAR UM PRÉDIO DA MALHA DGT (só consulta – NUNCA grava)
+   Com "Cadastro DGT (WMS)" ativo, tocar num sítio sem propriedade guardada consulta a OGC API da DGT
+   (prédios que intersectam o ponto) e mostra Concelho, Freguesia, Secção, Prédio e NIC numa caixa.
+   ======================================================== */
+const identLayer = L.layerGroup().addTo(map);   // destaque temporário (não é uma propriedade guardada)
+let identTip = null, identToken = 0;
+
+function ringHas(ring, x, y) {
+  let dentro = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i], [xj, yj] = ring[j];
+    if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) dentro = !dentro;
+  }
+  return dentro;
+}
+function geomHas(geo, ll) {
+  const polys = geo.type === 'Polygon' ? [geo.coordinates] : geo.type === 'MultiPolygon' ? geo.coordinates : [];
+  return polys.some(r => ringHas(r[0], ll.lng, ll.lat) && !r.slice(1).some(h => ringHas(h, ll.lng, ll.lat)));
+}
+
+/* ── Acesso de SÓ LEITURA à DGT para identificar prédios ───────────────────────────
+   Duas vias independentes, em paralelo (ganha a primeira que devolver o prédio):
+     OGC  = OGC API da DGT (coleção "cadastro", filtro bbox)
+     WMS  = GetFeatureInfo da camada "cadastralparcel" (GeoServer da DGT; consulta por ponto)
+   Cada via tenta: 1) URL direto  2) proxy do próprio site (/ogc, /snicws: servidor.py ou _redirects do Netlify)  3) proxy público.
+   NADA daqui grava dados: não há storeProperty, nem props.push, nem localStorage. */
+class OgcErro extends Error { constructor(msg, status) { super(msg); this.status = status; } }
+let ogcColecao = CONFIG.OGC_COLLECTION;       // só em memória
+let ogcDescobriu = false;
+let ultimoDiag = [];                          // passos da última identificação (para diagnóstico em Definições)
+const diagAdd = (rota, via, estado) => ultimoDiag.push(`${rota} ${via}: ${estado}`);
+
+/* Pedido resiliente: direto -> proxy local -> proxy público (URL sempre codificado com encodeURIComponent) */
+async function pedidoResiliente(rota, direto, local, sinal, publicoEm404 = true) {
+  let ultimo = null, semResposta = false;
+  for (const [via, url] of [['direto', direto], ['proxy-local', local]]) {
+    try {
+      const res = await fetch(url, { headers: { Accept: 'application/geo+json, application/json' }, signal: sinal || AbortSignal.timeout(15000) });
+      if (via !== 'direto' && !eProxyLocal(res)) { diagAdd(rota, via, 'inexistente'); continue; }   // ex.: Live Server/Netlify sem regras devolvem 404
+      if (res.ok) { diagAdd(rota, via, 'ok'); return res; }
+      diagAdd(rota, via, `HTTP ${res.status}`);
+      ultimo = new OgcErro(`HTTP ${res.status}`, res.status);
+      if (res.status === 400) break;                              // pedido inválido: nenhum proxy ajuda
+    } catch (err) {
+      if (err.name === 'AbortError') throw err;
+      diagAdd(rota, via, 'sem resposta (rede/CORS)');
+      semResposta = true; ultimo = ultimo || new OgcErro('sem ligação', 0);
+    }
+  }
+  const s = ultimo ? ultimo.status : 0;
+  if (CONFIG.PROXY_PUBLICO && (s === 0 || s === 403 || s >= 500 || (s === 404 && publicoEm404))) {
+    try {
+      const res = await fetch(CONFIG.PROXY_PUBLICO + encodeURIComponent(direto), { signal: sinal || AbortSignal.timeout(20000) });
+      diagAdd(rota, 'público', res.ok ? 'ok' : `HTTP ${res.status}`);
+      if (res.ok) return res;
+      if (res.status === 404) ultimo = new OgcErro('HTTP 404', 404);
+    } catch (err) { if (err.name === 'AbortError') throw err; diagAdd(rota, 'público', 'sem resposta'); }
+  }
+  throw ultimo || new OgcErro('sem ligação', 0);
+}
+
+/* O corpo tem de ser mesmo GeoJSON de prédios. Se vier outra coisa (página de erro, aviso do proxy…) não é "sem dados": é falha. */
+async function lerFeatures(res, rota) {
+  let txt = '';
+  try { txt = await res.text(); } catch (_) {}
+  let d = null;
+  try { d = JSON.parse(txt); } catch (_) { /* pode vir embrulhado por um proxy */ }
+  if (d && typeof d.contents === 'string') { try { d = JSON.parse(d.contents); } catch (_) {} }     // formato "get" do allorigins
+  if (d && (d.code === 'NotFound' || d.type === 'NotFound')) throw new OgcErro('não existe', 404);
+  if (!d || !Array.isArray(d.features)) { diagAdd(rota, 'resposta', 'não é GeoJSON'); throw new OgcErro('resposta inválida', 502); }
+  return d.features.filter(f => f && f.geometry).map(ensureWGS84);
+}
+
+/* bbox no formato exigido pela OGC API: minLng,minLat,maxLng,maxLat (graus, CRS84) */
+function bboxStr(lng1, lat1, lng2, lat2) {
+  const v = [lng1, lat1, lng2, lat2].map(Number);
+  if (v.some(x => !isFinite(x))) throw new OgcErro('bbox inválida', 400);
+  const [w, e] = [Math.min(v[0], v[2]), Math.max(v[0], v[2])], [s, n] = [Math.min(v[1], v[3]), Math.max(v[1], v[3])];
+  return [w, s, e, n].map(x => x.toFixed(7)).join(',');
+}
+
+async function ogcColecoesAlternativas(tentadas, sinal) {      // lê /collections e devolve ids que pareçam ser o cadastro
+  try {
+    const qs = new URLSearchParams({ f: 'json' });
+    const res = await pedidoResiliente('OGC', `${CONFIG.OGC_BASE}/collections?${qs}`, `/ogc/collections?${qs}`, sinal, false);
+    const d = JSON.parse(await res.text());
+    return (d.collections || []).map(c => String(c.id)).filter(id => /cadastr/i.test(id) && !tentadas.includes(id));
+  } catch (_) { return []; }
+}
+
+/* Prédios da OGC API que intersectam uma caixa, em GeoJSON lon/lat */
+async function ogcBBox(bbox, limit, sinal) {
+  const tentadas = [];
+  const colecoes = [ogcColecao, CONFIG.OGC_COLLECTION, 'CP.CadastralParcel', 'cp.cadastralparcel'].filter((c, i, a) => a.indexOf(c) === i);
+  for (let i = 0; i < colecoes.length; i++) {
+    const col = colecoes[i]; tentadas.push(col);
+    for (const extra of [{ crs: CONFIG.CRS84 }, {}]) {          // se a API recusar o parâmetro crs (400), repete sem ele
+      const qs = new URLSearchParams({ f: 'json', limit, bbox, ...extra });
+      try {
+        const res = await pedidoResiliente('OGC', `${CONFIG.OGC_BASE}/collections/${col}/items?${qs}`, `/ogc/collections/${col}/items?${qs}`, sinal, i === 0);
+        const feats = await lerFeatures(res, 'OGC');
+        ogcColecao = col;                                          // memória da sessão (não grava nada)
+        return feats;
+      } catch (err) {
+        if (err.name === 'AbortError') throw err;
+        if (err.status === 400) continue;                          // tenta sem crs
+        if (err.status === 404) break;                             // esta coleção não existe: passa à seguinte
+        throw err;                                                 // rede / erro do servidor / resposta inválida
+      }
+    }
+    if (i === colecoes.length - 1 && !ogcDescobriu) { ogcDescobriu = true; colecoes.push(...await ogcColecoesAlternativas(tentadas, sinal)); }   // descobrir o id real
+  }
+  throw new OgcErro('sem dados', 404);
+}
+
+const MSG_SEM_DADOS = 'Sem dados oficiais de cadastro neste local';
+const metrosPorPx = () => 156543.03392804097 / 2 ** map.getZoom();      // Web Mercator, metros por píxel
+
+/* Via OGC: prédio que contém o ponto tocado */
+async function fetchParcelAt(ll, sinal) {
+  const k = Math.cos(ll.lat * Math.PI / 180);
+  const r = Math.max(1.5, metrosPorPx() * k * 6);                        // ≈ 6 px de tolerância ao toque (metros no terreno)
+  const dLat = r / 111320, dLng = r / (111320 * k);
+  const feats = await ogcBBox(bboxStr(ll.lng - dLng, ll.lat - dLat, ll.lng + dLng, ll.lat + dLat), 25, sinal);
+  return feats.find(f => geomHas(f.geometry, ll)) || null;
+}
+
+/* Via WMS: GetFeatureInfo (consulta por ponto) na camada do cadastro */
+async function rotaWMS(ll, sinal) {
+  const W = 101, H = 101, res = metrosPorPx(), c = L.CRS.EPSG3857.project(ll);     // janela 101x101 px centrada no toque
+  const bbox = [c.x - res * W / 2, c.y - res * H / 2, c.x + res * W / 2, c.y + res * H / 2].map(v => v.toFixed(3)).join(',');
+  const qs = new URLSearchParams({ service: 'WMS', version: '1.3.0', request: 'GetFeatureInfo', layers: CONFIG.DGT_WMS_LAYER,
+    query_layers: CONFIG.DGT_WMS_LAYER, styles: '', format: 'image/png', crs: 'EPSG:3857', bbox, width: W, height: H,
+    i: (W - 1) / 2, j: (H - 1) / 2, info_format: 'application/json', feature_count: 5, buffer: 8 });
+  const resp = await pedidoResiliente('WMS', `${CONFIG.DGT_WMS_URL}?${qs}`, `/snicws?${qs}`, sinal, false);
+  const feats = await lerFeatures(resp, 'WMS');
+  return feats.find(f => geomHas(f.geometry, ll)) || feats[0] || null;
+}
+
+/* Corre as duas vias em paralelo; devolve o 1.º prédio encontrado. Se uma via responder "vazio", a outra tem 4 s de tolerância. */
+function identificarParcela(ll) {
+  ultimoDiag = [];
+  const ctl = new AbortController(), parar = setTimeout(() => ctl.abort(), 28000);
+  const vias = { OGC: fetchParcelAt(ll, ctl.signal), WMS: rotaWMS(ll, ctl.signal) };
+  const resp = {};
+  return new Promise(resolve => {
+    let falta = Object.keys(vias).length, tolerancia = null;
+    const fim = feat => { clearTimeout(parar); clearTimeout(tolerancia); ctl.abort(); resolve({ feat, resp }); };
+    Object.entries(vias).forEach(([nome, p]) => p.then(
+      v => { resp[nome] = { v }; if (v) fim(v); else if (!tolerancia) tolerancia = setTimeout(() => fim(null), 4000); },
+      e => { resp[nome] = { e }; }
+    ).finally(() => { if (--falta === 0) fim(resp.OGC?.v || resp.WMS?.v || null); }));
+  });
+}
+
+/* Malha vetorial (alternativa ao WMS): só contornos amarelos finos, interior inexistente. Carrega a zona visível (zoom ≥ 16). */
+const vetRenderer = L.canvas({ padding: .3 });
+async function desenharMalhaVet() {
+  if (!map.hasLayer(malhaVet)) return;
+  if (map.getZoom() < 16) {
+    if (vetBox) { malhaVet.clearLayers(); vetBox = null; }
+    return toast('Aproxime o mapa (zoom 16 ou mais) para ver as linhas do cadastro.');
+  }
+  const vista = map.getBounds();
+  if (vetBox && vetBox.contains(vista)) return;                  // esta zona já está desenhada
+  const area = vista.pad(0.5);
+  if (vetAbort) vetAbort.abort();
+  vetAbort = new AbortController();
+  try {
+    const feats = await ogcBBox(bboxStr(area.getWest(), area.getSouth(), area.getEast(), area.getNorth()), 1000, vetAbort.signal);
+    malhaVet.clearLayers();
+    L.geoJSON({ type: 'FeatureCollection', features: feats }, {
+      style: () => ({ color: AMARELO, weight: 1.2, opacity: 1, fill: false }),   // sem preenchimento
+      renderer: vetRenderer, interactive: false }).addTo(malhaVet);
+    vetBox = area;
+    if (feats.length >= 1000) toast('Zona muito densa: aproxime mais para ver todas as estremas.');
+  } catch (err) {
+    if (err.name === 'AbortError') return;
+    console.warn('Malha vetorial:', err);
+    toast(err.status === 404 ? MSG_SEM_DADOS : 'Não foi possível carregar as linhas do cadastro agora.');
+  }
+}
+
+/* Extrai identificação dos atributos devolvidos (NIC, freguesia e, se existirem, secção/prédio) */
+function parcelInfo(raw) {
+  const p = {}; for (const [k, v] of Object.entries(raw || {})) p[k.toLowerCase()] = v;          // nomes em minúsculas (o servidor pode usar camelCase)
+  const info = { nic: String(p.nationalcadastralreference || p.nic || '').trim(), dicofre: '', sec: '', pre: '' };
+  info.dicofre = (String(p.administrativeunit ?? p.dicofre ?? '').match(/\d{6}/) || [''])[0];
+  for (const v of Object.values(p)) {                            // "freguesia_secção_prédio" (ex.: 050223_BQ_66) em qualquer campo
+    const m = typeof v === 'string' && v.trim().match(/^(\d{6})_([A-Za-z0-9]+)_(\d+)$/);
+    if (m) { info.dicofre ||= m[1]; info.sec = m[2].toUpperCase(); info.pre = stripZeros(m[3]); }
+  }
+  if (!info.sec) {
+    const ks = Object.keys(p).find(k => /^(seccao|secção|section|sec)$/.test(k));
+    const kp = Object.keys(p).find(k => /^(numeropredio|numero_predio|n_?predio|predio|numpredio|prd)$/.test(k));
+    if (ks && kp && p[ks] && p[kp]) { info.sec = String(p[ks]).toUpperCase(); info.pre = stripZeros(p[kp]); }
+  }
+  return info;
+}
+/* Tentativa extra: o SNIC pode devolver a secção/prédio a partir do NIC (endereço presumido; se não existir, é ignorado) */
+async function secPreByNic(nic) {
+  const n = nic.replace(/\s/g, ''); if (!n) return null;
+  try {
+    const d = await snicGet('nic', { filter: n }, true);
+    const obj = Array.isArray(d) ? d.find(x => String(x?.nic || '').replace(/\s/g, '') === n) : d;
+    const m = obj && String(obj.nic || '').replace(/\s/g, '') === n && String(obj.id_cadastro || '').match(/^(\d{6})_([A-Za-z0-9]+)_(\d+)$/);
+    return m ? { dicofre: m[1], sec: m[2].toUpperCase(), pre: stripZeros(m[3]) } : null;
+  } catch (_) { return null; }
+}
+
+function identHTML(info, areaM2) {
+  const d = info.dicofre, d4 = d.slice(0, 4);
+  const freg = d ? (FREGUESIAS_LOCAL[d4] || []).find(([c]) => c === d) : null;
+  const row = (k, v) => `<div><span>${k}</span> ${v ? esc(v) : '—'}</div>`;
+  return `<strong>Prédio · só consulta</strong>` + row('Concelho:', d ? MUNICIPIOS_LOCAL[d4] : '') + row('Freguesia:', freg ? freg[1] : '')
+    + row('Secção:', info.sec) + row('Prédio:', info.pre) + row('NIC:', info.nic)
+    + (areaM2 ? row('Área:', `${areaM2.toLocaleString('pt-PT')} m²`) : '')
+    + `<em>${info.sec ? 'Não foi guardado.' : 'Secção/prédio indisponíveis nesta fonte. Não foi guardado.'}</em>`;
+}
+function showIdentTip(ll, html) {
+  if (identTip) map.removeLayer(identTip);
+  identTip = L.tooltip({ permanent: true, direction: 'top', className: 'cad-tip', opacity: 1, offset: [0, -6], interactive: false })
+    .setLatLng(ll).setContent(html).addTo(map);
+}
+function clearIdentify() {
+  identToken++; identLayer.clearLayers();
+  if (identTip) { map.removeLayer(identTip); identTip = null; }
+}
+/* Texto pequeno com o resultado de cada via (ajuda a perceber falhas no telemóvel, onde não há consola) */
+function diagResumo(resp) {
+  const f = r => !r ? '—' : r.e ? (r.e.status ? `erro ${r.e.status}` : r.e.name === 'AbortError' ? 'cancelada' : 'sem resposta') : (r.v ? 'encontrou' : '0 prédios');
+  return `OGC: ${f(resp.OGC)} · WMS: ${f(resp.WMS)}`;
+}
+
+/* IDENTIFICAR = SÓ CONSULTA. Mostra os dados numa tooltip temporária. NUNCA chama storeProperty, nem altera props/localStorage. */
+async function identifyAt(ll) {
+  const token = ++identToken;
+  identLayer.clearLayers(); showIdentTip(ll, '<strong>A identificar…</strong>');
+  try {
+    const { feat, resp } = await identificarParcela(ll);
+    if (token !== identToken) return;
+    if (!feat) {
+      console.warn('Identificação sem prédio:', diagResumo(resp), ultimoDiag);
+      const vazio = Object.values(resp).some(r => r && 'v' in r) || Object.values(resp).some(r => r && r.e && r.e.status === 404);
+      return showIdentTip(ll, (vazio ? `<strong>${MSG_SEM_DADOS}</strong>`
+        : '<strong>Não foi possível consultar o cadastro agora</strong><div>Verifique a ligação e toque de novo.</div>') + `<em>${diagResumo(resp)}</em>`);
+    }
+    L.geoJSON(feat, { style: () => ({ ...SEL_STYLE }), interactive: false }).addTo(identLayer);   // realce temporário (camada à parte; nunca vai para a lista)
+    const info = parcelInfo(feat.properties || {});
+    if (!info.sec && info.nic) Object.assign(info, await secPreByNic(info.nic) || {});
+    if (token !== identToken) return;
+    showIdentTip(ll, identHTML(info, Math.round(geomAreaM2(feat.geometry))));
+  } catch (err) {
+    if (token !== identToken) return;
+    console.warn('Identificação:', err, ultimoDiag);
+    showIdentTip(ll, '<strong>Não foi possível consultar o cadastro agora</strong><div>Verifique a ligação e toque de novo.</div>');
+  }
+}
+
+/* ========================================================
+   DEFINIÇÕES · CÓPIA DE SEGURANÇA (exportar / importar)
+   Os terrenos vivem no localStorage deste navegador: limpar a cache apaga-os. O backup é um ficheiro .json.
+   ======================================================== */
+const LAST_BACKUP_KEY = 'terrenos.lastBackup';
+const backupData = () => ({ app: 'terrenos', version: 1, exportedAt: new Date().toISOString(), props, groups, folders: subfolders });
+const marcarBackup = () => { try { localStorage.setItem(LAST_BACKUP_KEY, new Date().toISOString()); } catch (_) {} };
+
+async function exportBackup() {
+  const nome = `terrenos-backup-${new Date().toISOString().slice(0, 10)}.json`;
+  const file = new File([JSON.stringify(backupData(), null, 1)], nome, { type: 'application/json' });
+  try {   // no telemóvel abre a folha de partilha (Drive, WhatsApp, e-mail…)
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title: 'Backup dos terrenos' });
+      marcarBackup(); hideModal(); return toast('Backup partilhado');
+    }
+  } catch (err) { if (err.name === 'AbortError') return; }
+  const a = document.createElement('a'); a.href = URL.createObjectURL(file); a.download = nome;
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  marcarBackup(); hideModal(); toast('Backup descarregado');
+}
+
+function validateBackup(d) {
+  if (!d || d.app !== 'terrenos' || !Array.isArray(d.props)) throw new Error('não é um backup desta aplicação');
+  const poligono = g => g && ['Polygon', 'MultiPolygon', 'LineString', 'MultiLineString'].includes(g.type) && Array.isArray(g.coordinates);
+  return {
+    props:   d.props.filter(p => p && typeof p.id === 'string' && typeof p.name === 'string' && p.geojson && poligono(p.geojson.geometry)),
+    groups:  (d.groups  || []).filter(g => g && g.id && g.name),
+    folders: (d.folders || []).filter(f => f && f.id && f.name && f.group_id),
+  };
+}
+function applyImport(d, modo) {
+  clearVertices(); deselectProperty(); clearIdentify(); selected.clear();
+  if (modo === 'substituir') { props = []; groups = []; subfolders = []; }
+  const ids = new Set(props.map(p => p.id)); let novas = 0;
+  d.props.forEach(p => { if (!ids.has(p.id)) { props.push(p); ids.add(p.id); novas++; } });
+  d.groups.forEach(g => { if (!groups.some(x => x.id === g.id)) groups.push({ id: g.id, name: g.name }); });
+  d.folders.forEach(f => { if (!subfolders.some(x => x.id === f.id)) subfolders.push({ id: f.id, name: f.name, group_id: f.group_id }); });
+  props.forEach(p => {   // coerência dos grupos/pastas
+    if (!groups.some(g => g.id === p.group_id)) { p.group_id = null; p.folder_id = null; }
+    else if (p.folder_id && !subfolders.some(f => f.id === p.folder_id && f.group_id === p.group_id)) p.folder_id = null;
+  });
+  myLayer.clearLayers(); Object.keys(layersById).forEach(k => delete layersById[k]);
+  props.forEach(addToMap);
+  save(); saveGroups(); openGroupId = null; openFolderId = null; renderList(); hideModal();
+  if (props.length) map.fitBounds(myLayer.getBounds(), { padding: [40, 40], maxZoom: 17 });
+  const ignoradas = d.props.length - novas;
+  toast(modo === 'substituir' ? `Backup restaurado: ${props.length} itens` : `${novas} novos itens adicionados` + (ignoradas ? ` · ${ignoradas} já existiam` : ''));
+}
+function escolherFicheiro(direto = false) {   // direto = junta (merge) sem perguntar
+  const inp = document.createElement('input'); inp.type = 'file'; inp.accept = 'application/json,.json';
+  inp.onchange = async () => {
+    const f = inp.files[0]; if (!f) return;
+    try {
+      const d = validateBackup(JSON.parse(await f.text()));
+      if (direto) return applyImport(d, 'juntar');
+      showModal(`
+        <p class="modal-title">⬆️ Importar backup</p>
+        <p class="modal-sub">O ficheiro tem <b>${d.props.length}</b> propriedades, ${d.groups.length} grupos e ${d.folders.length} pastas.</p>
+        <button id="impJuntar" class="btn-primary">Juntar ao que já tenho</button>
+        <button id="impSub" class="btn-ghost" style="border:1.5px solid #e11d48;color:#e11d48">Substituir tudo (apaga o atual)</button>
+        <button class="btn-ghost mClose">Cancelar</button>`,
+      () => {
+        document.getElementById('impJuntar').onclick = () => applyImport(d, 'juntar');
+        document.getElementById('impSub').onclick = () => { if (confirm('Isto apaga todas as propriedades atuais e coloca as do ficheiro. Continuar?')) applyImport(d, 'substituir'); };
+      });
+    } catch (err) { toast('Ficheiro inválido: ' + err.message); }
+  };
+  inp.click();
+}
+function openSettings() {
+  let last = null; try { last = localStorage.getItem(LAST_BACKUP_KEY); } catch (_) {}
+  showModal(`
+    <p class="modal-title">⚙ Definições</p>
+    <p class="modal-sub">Os terrenos ficam guardados só neste navegador. <b>Limpar a cache ou os dados do site apaga-os.</b> Guarde cópias de segurança fora do telemóvel.</p>
+    <div class="sel-summary" style="margin:0 0 12px">${props.length} propriedades · ${groups.length} grupos · ${subfolders.length} pastas<br>Último backup: <b>${last ? new Date(last).toLocaleString('pt-PT') : 'nunca'}</b></div>
+    ${jaInstalada() ? '' : `<button id="pwaInstall" class="btn-primary" style="background:var(--gold-dark,#9a6b00);margin-bottom:8px">📲 Instalar no ecrã principal</button>`}
+    <details style="margin:0 0 10px;font-size:.78rem"><summary>Diagnóstico da última identificação</summary><pre style="white-space:pre-wrap;margin:6px 0 0">${esc(ultimoDiag.length ? ultimoDiag.join('\n') : 'Ainda não houve identificações.')}</pre></details>
+    <button id="bkExport" class="btn-primary">⬇️ Exportar backup</button>
+    <button id="bkImport" class="btn-ghost" style="border:1.5px solid #ddd;margin-bottom:6px">⬆️ Importar backup</button>
+    <button class="btn-ghost mClose">Fechar</button>`,
+  () => {
+    document.getElementById('bkExport').onclick = exportBackup; document.getElementById('bkImport').onclick = () => escolherFicheiro();
+    const inst = document.getElementById('pwaInstall');
+    if (inst) inst.onclick = async () => {
+      if (pedidoInstalar) { pedidoInstalar.prompt(); await pedidoInstalar.userChoice; pedidoInstalar = null; hideModal(); return; }
+      showModal(`<p class="modal-title">📲 Instalar a aplicação</p>
+        <p class="modal-sub"><b>Android (Chrome):</b> menu ⋮ › <i>Instalar aplicação</i> (ou <i>Adicionar ao ecrã principal</i>).<br><br>
+        <b>iPhone (Safari):</b> botão Partilhar ⬆️ › <i>Adicionar ao ecrã principal</i>.<br><br>
+        A instalação só está disponível quando a página é aberta por HTTPS (por exemplo, GitHub Pages ou Netlify).</p>
+        <button class="btn-ghost mClose">Fechar</button>`);
+    };
+  });
+}
+document.getElementById('btnSettings').onclick = openSettings;
+document.getElementById('btnExport').onclick = exportBackup;
+document.getElementById('btnImport').onclick = () => escolherFicheiro(true);
+if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});   // pede ao navegador para não apagar os dados
+
+/* ========================================================
+   PESQUISA DE LOCALIDADES (leaflet-control-geocoder / Nominatim, só Portugal)
+   Escrever o nome + Enter: o mapa centra-se no 1.º resultado; os restantes ficam numa lista para escolher.
+   Se a biblioteca falhar, pede diretamente ao Nominatim.
+   ======================================================== */
+const geoMarkers = L.layerGroup().addTo(map);
+let geoToken = 0, geoTimer = null;
+
+async function geocode(q) {
+  const GC = L.Control && L.Control.Geocoder;
+  if (GC && GC.nominatim) {
+    try {
+      const res = await Promise.race([
+        new Promise(ok => GC.nominatim({ geocodingQueryParams: { countrycodes: 'pt', limit: 6, 'accept-language': 'pt' } }).geocode(q, r => ok(r || []))),
+        new Promise((_, no) => setTimeout(() => no(new Error('timeout')), 9000)),
+      ]);
+      if (res.length) return res.map(r => ({ name: r.name, lat: r.center.lat, lng: r.center.lng,
+        bounds: r.bbox ? [[r.bbox.getSouth(), r.bbox.getWest()], [r.bbox.getNorth(), r.bbox.getEast()]] : null }));
+    } catch (_) { /* usa o pedido direto */ }
+  }
+  const r = await fetch('https://nominatim.openstreetmap.org/search?' + new URLSearchParams({ q, format: 'jsonv2', countrycodes: 'pt', limit: 6, 'accept-language': 'pt' }),
+    { signal: AbortSignal.timeout(15000) });
+  if (!r.ok) throw new Error(`Pesquisa indisponível (${r.status}).`);
+  return (await r.json()).map(x => ({ name: x.display_name, lat: +x.lat, lng: +x.lon,
+    bounds: x.boundingbox ? [[+x.boundingbox[0], +x.boundingbox[2]], [+x.boundingbox[1], +x.boundingbox[3]]] : null }));
+}
+
+function goToPlace(r) {
+  geoMarkers.clearLayers();
+  const curto = r.name.split(',').slice(0, 2).join(',').trim();
+  L.marker([r.lat, r.lng], { keyboard: false, icon: L.divIcon({ className: 'geo-pin', html: '📍', iconSize: [30, 30], iconAnchor: [15, 28] }) })
+    .bindTooltip(esc(curto), { permanent: true, direction: 'top', className: 'cad-tip', offset: [0, -26], interactive: false }).addTo(geoMarkers);
+  r.bounds ? map.fitBounds(r.bounds, { maxZoom: 15, padding: [30, 30] }) : map.setView([r.lat, r.lng], 14);
+}
+
+async function searchPlace(q, centrar) {
+  const out = document.getElementById('searchResults'), token = ++geoToken;
+  q = q.trim();
+  if (q.length < 2) { out.innerHTML = ''; return; }
+  out.innerHTML = '<li class="sr-msg"><span class="spinner"></span> A procurar…</li>';
+  try {
+    const res = await geocode(q);
+    if (token !== geoToken) return;
+    if (!res.length) { out.innerHTML = '<li class="sr-msg">Nenhuma localidade encontrada.</li>'; return; }
+    out.innerHTML = res.map((r, i) => {
+      const [a, ...resto] = r.name.split(',');
+      return `<li><button data-i="${i}"><b>${esc(a)}</b><span>${esc(resto.slice(0, 3).join(',').trim())}</span></button></li>`;
+    }).join('');
+    out._res = res;
+    if (centrar) goToPlace(res[0]);          // centra logo no 1.º resultado
+  } catch (err) {
+    if (token === geoToken) out.innerHTML = `<li class="sr-msg">Não foi possível pesquisar: ${esc(err.message)}</li>`;
+  }
+}
+function openSearch() {
+  document.getElementById('searchBar').classList.add('open');
+  const i = document.getElementById('searchInput'); i.focus(); i.select();
+}
+function closeSearch(limpar) {
+  document.getElementById('searchBar').classList.remove('open');
+  document.getElementById('searchInput').blur();
+  if (limpar) { geoMarkers.clearLayers(); document.getElementById('searchResults').innerHTML = ''; document.getElementById('searchInput').value = ''; }
+}
+document.getElementById('btnSearch').onclick = openSearch;
+document.getElementById('searchClose').onclick = () => closeSearch(true);
+document.getElementById('searchGo').onclick = () => searchPlace(document.getElementById('searchInput').value, true);
+document.getElementById('searchInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') { clearTimeout(geoTimer); searchPlace(e.target.value, true); e.target.blur(); }
+  if (e.key === 'Escape') closeSearch(true);
+});
+document.getElementById('searchInput').addEventListener('input', e => {      // sugestões enquanto escreve (sem mexer no mapa)
+  clearTimeout(geoTimer);
+  if (e.target.value.trim().length >= 3) geoTimer = setTimeout(() => searchPlace(e.target.value, false), 900);
+});
+document.getElementById('searchResults').addEventListener('click', e => {
+  const b = e.target.closest('button[data-i]'); if (!b) return;
+  goToPlace(document.getElementById('searchResults')._res[+b.dataset.i]);
+  closeSearch(false);                         // fecha a barra e deixa o marcador no local
+});
+map.on('click', () => closeSearch(false));
+
+/* ========================================================
+   UI HELPERS
+   ======================================================== */
+function openSheet()  { renderList(); document.getElementById('sheet').classList.add('open'); }
+function closeSheet() { document.getElementById('sheet').classList.remove('open'); }
+document.getElementById('btnList').onclick    = openSheet;
+document.getElementById('sheetClose').onclick = closeSheet;
+map.on('click', e => {
+  if (document.getElementById('sheet').classList.contains('open')) closeSheet();
+  if (drawHandler) return;                // a desenhar: os toques são vértices
+  if (!vtxState) deselectProperty();      // toque no vazio: tira o destaque (mantém-no enquanto o painel de vértices está aberto)
+  clearTimeout(idTimer);
+  if (map.hasLayer(wms) || map.hasLayer(malhaVet)) idTimer = setTimeout(() => identifyAt(e.latlng), 260);   // malha DGT ativa: identifica (só consulta); o atraso evita disparar num duplo toque
+  else clearIdentify();
+});
+map.on('dblclick zoomstart movestart', () => clearTimeout(idTimer));
+
+function showModal(html, afterFn) {
+  const body=document.getElementById('modalBody'), modal=document.getElementById('modal');
+  body.innerHTML = html;
+  modal.classList.add('open');
+  body.querySelectorAll('.mClose').forEach(b => b.onclick=hideModal);
+  if (afterFn) afterFn();
+}
+function hideModal() { document.getElementById('modal').classList.remove('open'); }
+document.getElementById('modal').addEventListener('click', e => {
+  if (e.target === document.getElementById('modal')) hideModal();
+});
+
+function showErr(msg) {
+  const el = document.getElementById('fErr');
+  if (!el) return; el.textContent = msg; el.style.display = 'block';
+}
+function clearErr() {
+  const el = document.getElementById('fErr');
+  if (el) { el.textContent=''; el.style.display='none'; }
+}
+
+let toastTimer;
+function toast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.style.display = 'block';
+  clearTimeout(toastTimer); toastTimer = setTimeout(()=>{ t.style.display='none'; }, 3200);
+}
+
+function esc(s) {
+  return String(s??'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+/* ========================================================
+   PWA: instalação no telemóvel (manifest.json + sw.js na mesma pasta do index.html)
+   ======================================================== */
+if ('serviceWorker' in navigator && (location.protocol === 'https:' || ['localhost', '127.0.0.1'].includes(location.hostname))) {
+  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(err => console.warn('Service worker:', err)));
+}
+let pedidoInstalar = null;     // evento do Chrome/Edge/Android que permite o botão "Instalar"
+window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); pedidoInstalar = e; });
+window.addEventListener('appinstalled', () => { pedidoInstalar = null; toast('Aplicação instalada 🌲'); });
+const jaInstalada = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+</script>
+</body>
+</html>

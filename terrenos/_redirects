@@ -1,0 +1,5 @@
+# Netlify: proxy do próprio site para a DGT (evita CORS e serviços de terceiros). Opcional; ficheiro na raiz, ao lado do index.html.
+/snic/*   https://snic.dgterritorio.gov.pt/geoportal/dgt_snic2/api/app/search/cgpr/:splat     200
+/snicp/*  https://snic.dgterritorio.gov.pt/geoportal/dgt_snic2/api/app/search/predio/:splat   200
+/ogc/*    https://ogcapi.dgterritorio.gov.pt/:splat                                           200
+/snicws    https://snicws.dgterritorio.gov.pt/geoserver/inspire/ows                             200

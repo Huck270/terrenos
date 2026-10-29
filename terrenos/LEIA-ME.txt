@@ -1,0 +1,64 @@
+OS MEUS TERRENOS - como usar
+============================
+
+OPCAO RECOMENDADA (rapida, sem bloqueios)
+1. Abre esta pasta no VS Code (Ficheiro > Abrir Pasta).
+2. Abre o terminal (Ctrl+') e escreve:      python servidor.py
+3. No browser abre:                          http://localhost:8000
+   O servidor faz de ponte para o SNIC e guarda cada resposta em dados/cache/.
+   A 2.a vez que pedires a mesma seccao/predio, e instantaneo e local.
+
+DADOS PROPRIOS (listas de seccoes e predios sem rede)
+No terminal, dentro da pasta:
+    python baixar_snic.py               TODO o Continente (so as freguesias com cadastro)
+    python baixar_snic.py 0502 0105     so estes concelhos
+Pode demorar (dezenas de minutos ou mais). Ctrl+C pausa; ao voltar a correr, continua.
+Cria dados/<freguesia>.json e dados/indice.json; a app le esses ficheiros primeiro e
+marca "(sem cadastro)" nas freguesias que o SNIC nao tem.
+Para atualizar mais tarde:  python baixar_snic.py --refazer
+
+PESQUISA E MEDICOES
+Botao da lupa (esquerda): pesquisa de localidades em Portugal.
+Botao da regua (direita): desenha uma linha e guarda a distancia.
+
+BACKUP DOS TERRENOS
+Os terrenos ficam guardados so no navegador. Limpar a cache apaga-os.
+No botao (engrenagem) das Definicoes: Exportar backup (ficheiro .json) e Importar backup.
+
+MALHA DO CADASTRO (botao das camadas, canto superior direito)
+- "Cadastro DGT (WMS)": linhas amarelas sobre o satelite (zoom 13+), sem preenchimento (estilo SLD enviado ao servidor).
+- "Cadastro DGT - linhas (zoom 16+)": alternativa vetorial desenhada pela propria app; use-a se o WMS falhar.
+Tocar num terreno com uma destas camadas ativas identifica-o (sem o guardar).
+
+PUBLICAR NO NETLIFY (paridade com o PC)
+Arraste para o Netlify a pasta com: index.html, freguesias.js, manifest.json, sw.js, _redirects, icons/ e dados/
+(dados/ = so os ficheiros <freguesia>.json e indice.json; NAO envie dados/cache/).
+- Sem servidor.py: o ficheiro _redirects faz de proxy (rotas /snic, /snicp, /ogc) e evita bloqueios CORS.
+- Se o proxy do Netlify falhar, a app tenta o servico publico allorigins (terceiros; desative com PROXY_PUBLICO: '' no index.html).
+Depois de publicar, no telemovel feche e reabra a app para o service worker atualizar (VERSAO terrenos-v3).
+
+INSTALAR NO TELEMOVEL (PWA)
+Os ficheiros manifest.json, sw.js e a pasta icons/ ficam NA MESMA PASTA do index.html (nao em subpastas).
+A instalacao so funciona com a app publicada em HTTPS (GitHub Pages, Netlify, ...): publique a pasta inteira
+(index.html, freguesias.js, manifest.json, sw.js, icons/ e, se quiser, dados/).
+- Android (Chrome): menu ... > Instalar aplicacao   (ou Definicoes da app > Instalar no ecra principal)
+- iPhone (Safari): Partilhar > Adicionar ao ecra principal
+Ao alterar ficheiros da app, mude VERSAO no sw.js (ex.: terrenos-v2) para o telemovel atualizar.
+
+ALTERNATIVA (Live Server)
+Go Live no index.html funciona, mas o browser pode bloquear os pedidos ao SNIC (CORS).
+Se aparecer "Sem acesso ao SNIC", usa o servidor.py.
+
+Ficheiros
+- index.html           a aplicacao
+- freguesias.js        concelhos e freguesias (DGT / CAOP2025)
+- freguesias_raw.json  dados de origem
+- gen_freg.py          regenera o freguesias.js
+- manifest.json / sw.js / icons/   instalacao como app (PWA)
+- servidor.py          servidor local + ponte com cache para o SNIC
+- baixar_snic.py       descarrega seccoes e predios para dados/
+- dados/               ficheiros descarregados e cache
+
+Para usar no telemovel
+Publica index.html, freguesias.js e a pasta dados/ num servico HTTPS (GitHub Pages, Netlify).
+A localizacao so funciona em HTTPS. Com os dados/ descarregados, as listas funcionam sem o SNIC.

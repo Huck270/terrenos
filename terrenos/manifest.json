@@ -1,0 +1,38 @@
+{
+  "id": "./",
+  "name": "Os meus terrenos",
+  "short_name": "Terrenos",
+  "description": "Mapa e gestão das minhas propriedades rústicas, com cadastro da DGT.",
+  "lang": "pt-PT",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#1f3d2b",
+  "theme_color": "#1f3d2b",
+  "categories": [
+    "navigation",
+    "utilities"
+  ],
+  "icons": [
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "prefer_related_applications": false
+}
