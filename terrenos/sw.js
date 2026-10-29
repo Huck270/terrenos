@@ -2,7 +2,7 @@
    Serve para: (1) cumprir os requisitos de instalação no telemóvel; (2) abrir a app sem rede.
    Guarda a "casca" da app (index.html, freguesias.js, ícones, bibliotecas). NÃO guarda mapas, SNIC, DGT, WMS nem pesquisas.
    Ao alterar ficheiros da app, mude VERSAO (ex.: terrenos-v2) para forçar a atualização. */
-const VERSAO = 'terrenos-v5';
+const VERSAO = 'terrenos-v6';
 const CASCA = ['./', 'index.html', 'manifest.json', 'freguesias.js',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-maskable-512.png', 'icons/apple-touch-icon.png'];
 
@@ -26,7 +26,7 @@ self.addEventListener('fetch', e => {
   const url = new URL(req.url);
 
   // dados que mudam ou são enormes: vão sempre à rede, sem cache
-  const dinamico = /^\/(snicp?|snicws|ogc)(\/|$)/.test(url.pathname) ||
+  const dinamico = /^\/(snicp?|snicws|ogc|nominatim)(\/|$)/.test(url.pathname) ||
     /dgterritorio\.gov\.pt|allorigins\.win|nominatim|openstreetmap\.org|arcgisonline\.com|arcgis\.com|cartocdn\.com|opentopomap\.org/.test(url.hostname);
   if (dinamico) return;
 

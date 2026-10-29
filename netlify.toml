@@ -4,7 +4,8 @@
 [build]
   publish = "terrenos"
 
-# Proxy para a DGT (evita CORS). Equivalente ao ficheiro terrenos/_redirects.
+# Proxies same-origin (HTTPS): o browser não fala diretamente com a DGT (CORS / mixed content).
+
 [[redirects]]
   from = "/snic/*"
   to = "https://snic.dgterritorio.gov.pt/geoportal/dgt_snic2/api/app/search/cgpr/:splat"
@@ -26,5 +27,17 @@
 [[redirects]]
   from = "/snicws"
   to = "https://snicws.dgterritorio.gov.pt/geoserver/inspire/ows"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/snicws/*"
+  to = "https://snicws.dgterritorio.gov.pt/geoserver/inspire/ows/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/nominatim/*"
+  to = "https://nominatim.openstreetmap.org/:splat"
   status = 200
   force = true

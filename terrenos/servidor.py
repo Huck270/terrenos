@@ -14,6 +14,7 @@ UPSTREAM = os.environ.get('SNIC_UPSTREAM', 'https://snic.dgterritorio.gov.pt/geo
 UPSTREAM_WS = os.environ.get('WS_UPSTREAM', 'https://snicws.dgterritorio.gov.pt/geoserver/inspire/ows')   # WMS/GetFeatureInfo (rota /snicws)
 UPSTREAM_OGC = os.environ.get('OGC_UPSTREAM', 'https://ogcapi.dgterritorio.gov.pt')   # OGC API da DGT (rota /ogc/)
 UPSTREAM_PREDIO = os.environ.get('SNIC_UPSTREAM_PREDIO', 'https://snic.dgterritorio.gov.pt/geoportal/dgt_snic2/api/app/search/predio')
+UPSTREAM_NOM = os.environ.get('NOMINATIM_UPSTREAM', 'https://nominatim.openstreetmap.org')
 CACHE = os.path.join('dados', 'cache')
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 8000
 HEADERS = {'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json',
@@ -30,6 +31,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return self.ponte(UPSTREAM_OGC, self.path[len('/ogc/'):])
         if self.path.startswith('/snicp/'):          # geometria do prédio
             return self.ponte(UPSTREAM_PREDIO, self.path[len('/snicp/'):])
+        if self.path.startswith('/nominatim/'):
+            return self.ponte(UPSTREAM_NOM, self.path[len('/nominatim/'):])
         super().do_GET()
 
     def ponte(self, upstream, resto):
